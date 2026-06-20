@@ -1,6 +1,6 @@
 {
   "name": "Burmese Recap Tool",
-  "description": "Premium AI Creator Studio for Myanmar Video Creators featuring Universal Video Downloader, AI Subtitle Studio with Burmese syllable segmenter, and Long-form Edge TTS, plus Flutter source exporter.",
+  "description": "Premium AI Creator Studio for Myanmar Video Creators featuring Universal Video Downloader, AI Subtitle Studio with Burmese syllable segmenter, and Long-form Edge TTS.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

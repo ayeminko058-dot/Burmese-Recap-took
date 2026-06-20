@@ -4,11 +4,7 @@
  */
 
 import React, { useState } from "react";
-import { 
-  Terminal, Layers, Cpu, Code, BookOpen, User, CheckCircle, HelpCircle, Phone, Sparkles 
-} from "lucide-react";
 import PhoneMock from "./components/PhoneMock";
-import DeveloperConsole from "./components/DeveloperConsole";
 import { DownloadTask, AppNotification } from "./types";
 
 interface SavedFile {
@@ -74,83 +70,23 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070B13] text-slate-100 flex flex-col justify-between select-none">
-      {/* Structural Minimal Header */}
-      <header className="border-b border-slate-900 bg-[#0A0E18] py-4 px-6 shrink-0 select-none text-left">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="bg-gradient-to-tr from-blue-600 to-emerald-600 text-white p-2.5 rounded-2xl shadow-lg">
-              <Layers className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm font-extrabold tracking-tight text-white uppercase sm:text-base">
-                  Burmese Recap Studio
-                </h1>
-                <span className="text-[9px] bg-emerald-500/10 text-emerald-400 py-0.5 px-2 rounded-full font-mono border border-emerald-550/15 uppercase font-bold">
-                  PRO AI v1.5
-                </span>
-              </div>
-              <p className="text-[10px] text-slate-400 font-sans mt-0.5">
-                Full-scale Clean Code Generator + Multi-Pipeline Android Native Simulator
-              </p>
-            </div>
-          </div>
+    <div className="h-screen w-screen bg-[#070B13] text-slate-100 flex items-center justify-center overflow-hidden select-none">
+      {/* Decorative ambient background glows */}
+      <div className="absolute top-1/4 left-1/4 -translate-x-1/2 -translate-y-1/2 w-96 h-96 bg-blue-500/10 rounded-full blur-[120px] pointer-events-none" />
+      <div className="absolute bottom-1/4 right-1/4 translate-x-1/2 translate-y-1/2 w-96 h-96 bg-emerald-500/5 rounded-full blur-[120px] pointer-events-none" />
 
-          <div className="flex items-center gap-4 text-[10px] text-slate-400">
-            <div className="flex items-center gap-1.5 bg-[#121A2E] py-1.5 px-3 rounded-full border border-slate-800">
-              <Cpu className="w-3.5 h-3.5 text-blue-400" />
-              <span>Host Engine: <b className="text-slate-200">Express + Vite</b></span>
-            </div>
-            <div className="flex items-center gap-1.5 bg-[#121A2E] py-1.5 px-3 rounded-full border border-slate-800">
-              <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Target: <b className="text-slate-200">Android SDK 34/35</b></span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Dual Viewport Bento Layout */}
-      <main className="flex-1 w-full max-w-7xl mx-auto px-4 md:px-6 py-6 flex flex-col lg:grid lg:grid-cols-12 gap-6 items-start">
-        {/* Left column: Android Mobile Simulator */}
-        <div className="lg:col-span-5 w-full flex flex-col items-center">
-          <div className="text-center mb-1 bg-[#121A2E]/60 border border-slate-800 py-1.5 px-4 rounded-full text-[10px] text-slate-350 select-none flex items-center gap-1.5 leading-none">
-            <Phone className="w-3.5 h-3.5 text-blue-400" />
-            Interactive Mobile Sandbox (Touch/Scrollable)
-          </div>
-          
-          <PhoneMock
-            onAddNotification={handleAddNotification}
-            notifications={notifications}
-            setNotifications={setNotifications}
-            tasks={tasks}
-            setTasks={setTasks}
-            downloadedFiles={downloadedFiles}
-            setDownloadedFiles={setDownloadedFiles}
-          />
-        </div>
-
-        {/* Right column: Clean Architecture Flutter Source Code Editor */}
-        <div className="lg:col-span-7 w-full flex flex-col">
-          <div className="text-center mb-1 bg-[#121A2E]/60 border border-slate-800 py-1.5 px-4 rounded-full text-[10px] text-slate-350 select-none flex items-center gap-1.5 leading-none self-start">
-            <Code className="w-3.5 h-3.5 text-emerald-400" />
-            Flutter Clean Arch MVVM Workspace Codebase
-          </div>
-
-          <DeveloperConsole onAddNotification={handleAddNotification} />
-        </div>
-      </main>
-
-      {/* Human design footers */}
-      <footer className="border-t border-slate-900 bg-[#080C14] py-4 text-center shrink-0">
-        <div className="max-w-7xl mx-auto px-6 text-[10px] text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-3 font-sans">
-          <p>Designed strictly for Myanmar Recap Creators & Mobile App Architects.</p>
-          <p className="flex items-center gap-1 font-mono">
-            <span>PLATFORM BUILD: SUCCESS</span>
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse ml-0.5" />
-          </p>
-        </div>
-      </footer>
+      {/* Main Container centering the Interactive Mobile Sandbox */}
+      <div className="relative flex flex-col items-center justify-center w-full h-full max-h-full">
+        <PhoneMock
+          onAddNotification={handleAddNotification}
+          notifications={notifications}
+          setNotifications={setNotifications}
+          tasks={tasks}
+          setTasks={setTasks}
+          downloadedFiles={downloadedFiles}
+          setDownloadedFiles={setDownloadedFiles}
+        />
+      </div>
     </div>
   );
 }
