@@ -1,0 +1,275 @@
+import React, { useState, useRef, useEffect } from "react";
+import { 
+  Volume2, Play, Pause, Download, Settings, Disc, Sparkles, RefreshCw, Layers, CheckCircle 
+} from "lucide-react";
+import { VoiceOption } from "../types";
+
+export const VOICE_MATRIX: VoiceOption[] = [
+  { code: "my-MM-NilarNeural", name: "MM Nilar (Female HQ)", language: "Myanmar", flag: "🇲🇲" },
+  { code: "my-MM-ThihaNeural", name: "MM Thiha (Male HQ)", language: "Myanmar", flag: "🇲🇲" },
+  { code: "en-US-JennyNeural", name: "EN Jenny (Female Fluid)", language: "US English", flag: "🇺🇸" },
+  { code: "en-US-GuyNeural", name: "EN Guy (Male Soft)", language: "US English", flag: "🇺🇸" },
+  { code: "th-TH-PremwadeeNeural", name: "TH Premwadee (Narrative)", language: "Thai", flag: "🇹🇭" },
+  { code: "zh-CN-XiaoxiaoNeural", name: "ZH Xiaoxiao (Warm)", language: "Chinese", flag: "🇨🇳" },
+  { code: "ko-KR-SunHiNeural", name: "KO Sun-Hi (Vibrant)", language: "Korean", flag: "🇰🇷" }
+];
+
+interface TtsStudioProps {
+  onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
+  onAddDownloadedFile: (name: string, data: string, type: "srt" | "audio" | "video", audioUrl?: string) => void;
+}
+
+export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: TtsStudioProps) {
+  const [text, setText] = useState(
+    "ပရိသတ်ကြီးခင်ဗျာ။ ယနေ့ တင်ဆက်ပေးမယ့် ဇာတ်ကားကတော့ နာမည်ကျော် မင်းသားကြီးရဲ့ ဂန္ထဝင် စွန့်စားခန်း ဇာတ်လမ်းတစ်ပုဒ်ပဲ ဖြစ်ပါတယ်။ နောက်ဆုံးအချိန်အထိ စိတ်လှုပ်ရှားစွာနဲ့ ကြည့်ရှုရမှာမို့ ဗီဒီယိုလေးကို Like and Subbed လုပ်ပေးခဲ့ကြပါဦး။"
+  );
+  const [selectedVoice, setSelectedVoice] = useState("my-MM-NilarNeural");
+  const [isSynthesizing, setIsSynthesizing] = useState(false);
+  const [syncedAudioUrl, setSyncedAudioUrl] = useState<string | null>(null);
+  const [audioPlayState, setAudioPlayState] = useState(false);
+  const [progressLog, setProgressLog] = useState("");
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const charCount = text.length;
+  const chunkEstimate = Math.ceil(charCount / 180);
+
+  const handleSynthesizeTts = async () => {
+    if (!text.trim()) return;
+    setIsSynthesizing(true);
+    setAudioPlayState(false);
+    setSyncedAudioUrl(null);
+    setProgressLog("Initializing connection...");
+
+    try {
+      // Step-by-step progress simulation to reflect sequential buffer merger
+      let currentProgress = 0;
+      const progressTimer = setInterval(() => {
+        if (currentProgress < chunkEstimate) {
+          currentProgress += 1;
+          setProgressLog(`Merging voice chunk ${currentProgress} of ${chunkEstimate}...`);
+        } else {
+          setProgressLog("Assembling high-fidelity audio bytes...");
+          clearInterval(progressTimer);
+        }
+      }, 700);
+
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          text,
+          voice: selectedVoice,
+        }),
+      });
+
+      clearInterval(progressTimer);
+
+      if (!response.ok) {
+        throw new Error("Local synthesis proxy returned an error. Check key quotas.");
+      }
+
+      const audioBlob = await response.blob();
+      const localUrl = URL.createObjectURL(audioBlob);
+
+      setSyncedAudioUrl(localUrl);
+      setProgressLog("");
+      setIsSynthesizing(false);
+      onAddNotification(
+        "Vocal Track Generated",
+        `Synthesized ${chunkEstimate} clauses successfully. Click Play!`,
+        "success"
+      );
+
+      // Register inside files list
+      const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
+      
+      // Let's create a visual identifier for the file metadata
+      onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", localUrl);
+    } catch (err: any) {
+      console.error(err);
+      setProgressLog("");
+      setIsSynthesizing(false);
+      onAddNotification("Synthesis Failed", "Please verify internet connection or API settings.", "warning");
+    }
+  };
+
+  const togglePlayback = () => {
+    if (!audioRef.current) return;
+    if (audioPlayState) {
+      audioRef.current.pause();
+      setAudioPlayState(false);
+    } else {
+      audioRef.current.play();
+      setAudioPlayState(true);
+    }
+  };
+
+  const handleDownloadMp3 = () => {
+    if (!syncedAudioUrl) return;
+    const fileName = `Burmese_Vocal_${Date.now().toString().slice(-4)}.mp3`;
+    const link = document.createElement("a");
+    link.href = syncedAudioUrl;
+    link.download = fileName;
+    link.click();
+    onAddNotification("Vocal Track Downloaded", "MP3 file successfully compiled and saved.", "success");
+  };
+
+  useEffect(() => {
+    // Sync current audio state on standard HTML5 timeline termination
+    const handleEnded = () => setAudioPlayState(false);
+    const audioNode = audioRef.current;
+    if (audioNode) {
+      audioNode.addEventListener("ended", handleEnded);
+    }
+    return () => {
+      if (audioNode) {
+        audioNode.removeEventListener("ended", handleEnded);
+      }
+    };
+  }, [syncedAudioUrl]);
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="tts-studio">
+      <div className="p-4 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
+              <Volume2 className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold tracking-wide text-slate-100">Edge TTS Studio</h2>
+              <p className="text-[10px] text-slate-400">Ultra Long-form Myanmar Voice Engrave</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#070B13]">
+        {/* Voice setup */}
+        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-blue-400" />
+              Target Speaker Matrix
+            </span>
+          </div>
+
+          <div className="relative">
+            <select
+              value={selectedVoice}
+              onChange={(e) => setSelectedVoice(e.target.value)}
+              className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+            >
+              {VOICE_MATRIX.map((v) => (
+                <option key={v.code} value={v.code} className="bg-[#1A2333]">
+                  {v.flag} {v.name} ({v.language})
+                </option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
+              <Settings className="w-3.5 h-3.5" />
+            </div>
+          </div>
+        </div>
+
+        {/* Text Area */}
+        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+              Voice Script (Supports 10,000+ chars)
+            </span>
+            <span className="text-[9px] text-slate-400 font-mono">
+              Chars: <b className="text-blue-400">{charCount}</b>
+            </span>
+          </div>
+
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Introduce long script segments here..."
+            maxLength={11000}
+            rows={5}
+            className="w-full bg-[#0D1321]/60 border border-[#1E293B] text-xs text-slate-200 rounded-xl p-3 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500"
+          />
+
+          <div className="flex items-center justify-between text-[9px] text-slate-400 px-0.5">
+            <span>Buffer Parts: <b className="text-slate-300 font-mono">{chunkEstimate} Clause{chunkEstimate > 1 ? "s" : ""}</b></span>
+            <span>No HTTP Timeouts</span>
+          </div>
+
+          <button
+            onClick={handleSynthesizeTts}
+            disabled={isSynthesizing || !text.trim()}
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs py-3.5 rounded-xl transition-all duration-200 mt-2 flex items-center justify-center gap-2 active:scale-[0.98] shadow-md shadow-blue-950/20"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSynthesizing ? "animate-spin" : ""}`} />
+            {isSynthesizing ? "Synthesizing vocal wave..." : "Synthesize MP3 Voice"}
+          </button>
+        </div>
+
+        {/* Loading progression logs */}
+        {isSynthesizing && (
+          <div className="bg-[#1D283C]/60 border border-blue-500/20 rounded-2xl p-3.5 text-center flex flex-col items-center justify-center space-y-2">
+            <Disc className="w-5 h-5 text-blue-400 animate-spin" />
+            <p className="text-[10px] font-mono text-blue-300">{progressLog}</p>
+          </div>
+        )}
+
+        {/* Combined Playback Engine Card */}
+        {syncedAudioUrl && (
+          <div className="bg-[#1A2333]/95 border border-emerald-500/20 rounded-2xl p-4 space-y-3 shadow-lg">
+            <div className="flex items-center justify-between">
+              <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1">
+                <CheckCircle className="w-3 h-3" />
+                INTEGRATED MIXER READY
+              </span>
+              <span className="text-[8px] font-mono text-slate-500">MPEG Layer-3</span>
+            </div>
+
+            <audio ref={audioRef} src={syncedAudioUrl} className="hidden" />
+
+            <div className="flex items-center gap-3 bg-[#0D1321] rounded-2xl p-3 border border-slate-800">
+              <button
+                onClick={togglePlayback}
+                className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 flex items-center justify-center shrink-0 transition-all duration-200"
+              >
+                {audioPlayState ? <Pause className="w-4 h-4 fill-current text-slate-950" /> : <Play className="w-4 h-4 fill-current text-slate-950 ml-0.5" />}
+              </button>
+
+              <div className="flex-1 flex flex-col justify-center">
+                <p className="text-[10px] text-slate-200 font-semibold truncate">Burmese_Voice_Compiled.mp3</p>
+                {/* Simulated waveforms visualizer */}
+                <div className="flex items-end gap-[2px] h-3 mt-1.5 select-none">
+                  {Array.from({ length: 32 }).map((_, idx) => {
+                    const height = audioPlayState 
+                      ? Math.sin(idx + Date.now() * 0.05) * 4 + 7 
+                      : 4;
+                    return (
+                      <div 
+                        key={idx} 
+                        className={`w-[2px] rounded-full transition-all duration-150 ${
+                          audioPlayState ? 'bg-emerald-400' : 'bg-slate-700'
+                        }`} 
+                        style={{ height: `${height}px` }} 
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={handleDownloadMp3}
+              className="w-full bg-[#1A2333] hover:bg-slate-800 border border-[#1E293B] text-slate-200 text-xs py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Download MP3 Track
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
