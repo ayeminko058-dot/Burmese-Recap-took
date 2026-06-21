@@ -293,6 +293,14 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
   );
   const [blocks, setBlocks] = useState<any[]>(preloadedSubtitles);
   const [isDownloadingSrt, setIsDownloadingSrt] = useState(false);
+
+  const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
+    if (typeof (window as any).customAlert === "function") {
+      await (window as any).customAlert(message, title);
+    } else {
+      alert(message);
+    }
+  };
   
   // Customizer styling states
   const [accentClass, setAccentClass] = useState("text-yellow-400");
@@ -459,8 +467,12 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
   };
 
   // Reset workspace
-  const handleResetWorkspace = () => {
-    if (window.confirm("Restore factory default subtitle track blocks? This will refresh translations.")) {
+  const handleResetWorkspace = async () => {
+    const confirmed = typeof (window as any).customConfirm === "function"
+      ? await (window as any).customConfirm("Restore factory default subtitle track blocks? This will refresh translations.", "Reset Subtitles")
+      : window.confirm("Restore factory default subtitle track blocks? This will refresh translations.");
+    
+    if (confirmed) {
       setBlocks(preloadedSubtitles);
       setSimulationProgressMs(0);
       stopSimulation();
@@ -593,7 +605,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
           });
 
           setIsDownloadingSrt(false);
-          alert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+          await triggerAlert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", "အောင်မြင်ပါသည်");
           
           if (onAddDownloadedFile) {
             onAddDownloadedFile(cleanFileName, srtStr, "srt");
@@ -613,7 +625,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
             URL.revokeObjectURL(url);
 
             setIsDownloadingSrt(false);
-            alert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+            await triggerAlert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", "အောင်မြင်ပါသည်");
             
             if (onAddDownloadedFile) {
               onAddDownloadedFile(cleanFileName, srtStr, "srt");
@@ -622,7 +634,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
           } catch (browserErr) {
             console.error("SRT final download loop error:", browserErr);
             setIsDownloadingSrt(false);
-            alert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။");
+            await triggerAlert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။", "အမှားအယွင်း");
           }
         }
       },

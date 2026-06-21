@@ -1,0 +1,11 @@
+{
+  "appId": "com.myanmarsol.burmese_recap_tool",
+  "appName": "Burmese Recap Tool",
+  "webDir": "dist",
+  "bundledWebRuntime": false,
+  "plugins": {
+    "AdMob": {
+      "androidAppId": "ca-app-pub-3940256099942544~3347511713"
+    }
+  }
+}

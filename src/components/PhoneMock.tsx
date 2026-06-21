@@ -49,6 +49,54 @@ export default function PhoneMock({
   const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
   const [bottomTab, setBottomTab] = useState<"home" | "downloads" | "settings">("home");
   
+  // Custom dialog overlay
+  const [dialogState, setDialogState] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    isConfirm: boolean;
+    resolve: ((val: boolean) => void) | null;
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    isConfirm: false,
+    resolve: null,
+  });
+
+  const handleDialogAction = (val: boolean) => {
+    if (dialogState.resolve) {
+      dialogState.resolve(val);
+    }
+    setDialogState((prev) => ({ ...prev, isOpen: false, resolve: null }));
+  };
+
+  useEffect(() => {
+    (window as any).customAlert = (message: string, title: string = "သတိပေးချက်") => {
+      return new Promise<boolean>((resolve) => {
+        setDialogState({
+          isOpen: true,
+          title,
+          message,
+          isConfirm: false,
+          resolve,
+        });
+      });
+    };
+
+    (window as any).customConfirm = (message: string, title: string = "အတည်ပြုရန်") => {
+      return new Promise<boolean>((resolve) => {
+        setDialogState({
+          isOpen: true,
+          title,
+          message,
+          isConfirm: true,
+          resolve,
+        });
+      });
+    };
+  }, []);
+
   // Custom interactive permission dialog simulator
   const [permissionGranted, setPermissionGranted] = useState(false);
   const [showPermissionDialog, setShowPermissionDialog] = useState(false);
@@ -89,6 +137,16 @@ export default function PhoneMock({
         });
 
         console.log("[AdMob] Banner loaded successfully at BOTTOM_CENTER");
+
+        // Strict pre-loading of Reward Video Ad on app mount
+        try {
+          await AdMob.prepareRewardVideoAd({
+            adId: "ca-app-pub-3940256099942544/5224354917", // Demo Reward Ad ID
+          });
+          console.log("[AdMob] Reward video preloaded successfully");
+        } catch (rewardErr) {
+          console.warn("[AdMob] Reward video preload bypassed:", rewardErr);
+        }
       } catch (err) {
         console.warn("[AdMob] Safe initialization bypass (e.g. running on browser):", err);
       }
@@ -364,7 +422,7 @@ export default function PhoneMock({
                 </div>
 
                 {/* Column 2: Three Core Interactive Studio Cards */}
-                <div className="space-y-4">
+                <div className="space-y-3.5">
                   <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 select-none text-left">
                     Core Studio Suites
                   </div>
@@ -372,22 +430,22 @@ export default function PhoneMock({
                   {/* Voice to Text (Gemini) Card */}
                   <div
                     onClick={() => handlePushScreen("downloader")}
-                    className="bg-indigo-950/45 border-2 border-indigo-500/20 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(99,102,241,0.2)] hover:shadow-[0_30px_55px_rgba(99,102,241,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-indigo-950/60 active:scale-[0.98] group relative overflow-hidden text-left"
+                    className="bg-indigo-950/45 border-2 border-indigo-500/15 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(99,102,241,0.15)] hover:shadow-[0_20px_40px_rgba(99,102,241,0.4)] transition-all duration-300 hover:scale-[1.015] hover:bg-indigo-950/60 active:scale-[0.985] group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-4">
-                      <div className="p-3.5 bg-indigo-600 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-indigo-500/30">
-                        <Mic className="w-5 h-5 animate-pulse" />
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-indigo-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-indigo-500/20">
+                        <Mic className="w-4 h-4 animate-pulse" />
                       </div>
-                      <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-white tracking-wide group-hover:text-indigo-400 transition-colors flex flex-wrap items-center gap-1.5 font-sans">
+                      <div className="text-left flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-white tracking-wide group-hover:text-indigo-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
                           <span>Voice to Text</span>
-                          <span className="text-[8px] bg-indigo-500 text-white font-extrabold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            GEMINI API REQUIRED
+                          <span className="text-[7px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            GEMINI API
                           </span>
                         </h3>
-                        <p className="text-xs text-slate-300 font-semibold leading-relaxed mt-2.5">
-                          အသံဖိုင်နှင့် ဗီဒီယိုဖိုင်များ (MP3/WAV/MP4/MOV စသည်) မှ စာသားကို အဆင့်မြင့် Gemini API စနစ်ဖြင့် ဖတ်ယူပေးနိုင်သည်။ စာသားသီးသန့် သို့မဟုတ် စာတန်းထိုး (.SRT) ဖိုင်များကို ချက်ချင်းထုတ်ယူနိုင်သည်။
+                        <p className="text-xs text-slate-300 font-normal leading-relaxed mt-1.5">
+                          အသံဖိုင်နှင့် ဗီဒီယိုဖိုင်များမှ စာသားကို အဆင့်မြင့် Gemini API စနစ်ဖြင့် ဖတ်ယူပေးနိုင်သည်။ စာသားသီးသန့် သို့မဟုတ် စာတန်းထိုး (.SRT) ဖိုင်များကို ချက်ချင်းထုတ်ယူနိုင်သည်။
                         </p>
                       </div>
                     </div>
@@ -396,21 +454,21 @@ export default function PhoneMock({
                   {/* Translator (Gemini) Card */}
                   <div
                     onClick={() => handlePushScreen("translator")}
-                    className="bg-emerald-950/40 border-2 border-emerald-500/20 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(16,185,129,0.2)] hover:shadow-[0_30px_55px_rgba(16,185,129,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-emerald-950/50 active:scale-[0.98] group relative overflow-hidden text-left"
+                    className="bg-emerald-950/40 border-2 border-emerald-500/15 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(16,185,129,0.15)] hover:shadow-[0_20px_40px_rgba(16,185,129,0.4)] transition-all duration-300 hover:scale-[1.015] hover:bg-emerald-950/50 active:scale-[0.985] group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-4">
-                      <div className="p-3.5 bg-emerald-600 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-emerald-500/30">
-                        <Smartphone className="w-5 h-5" />
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-emerald-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/20">
+                        <Smartphone className="w-4 h-4" />
                       </div>
-                      <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-white tracking-wide group-hover:text-emerald-450 transition-colors flex flex-wrap items-center gap-1.5 font-sans">
+                      <div className="text-left flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-white tracking-wide group-hover:text-emerald-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
                           <span>Translator</span>
-                          <span className="text-[8px] bg-emerald-600 text-white font-extrabold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            GEMINI API REQUIRED
+                          <span className="text-[7px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            GEMINI API
                           </span>
                         </h3>
-                        <p className="text-xs text-slate-300 font-semibold leading-relaxed mt-2.5">
+                        <p className="text-xs text-slate-300 font-normal leading-relaxed mt-1.5">
                           မြန်မာစာ အပါအဝင် နိုင်ငံတကာဘာသာစကား ၁၃ မျိုးကို အလိုအလျောက် ရွေးချယ်ပြီး ဆီလျော်အောင် တိုက်ရိုက်ဘာသာပြန်ပေးနိုင်သည့် အဆင့်မြင့် Gemini Translator စနစ်။
                         </p>
                       </div>
@@ -420,21 +478,21 @@ export default function PhoneMock({
                   {/* Subtitle Card */}
                   <div
                     onClick={() => handlePushScreen("subtitle")}
-                    className="bg-[#FFF0F3]/95 border-2 border-white/65 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(16,185,129,0.3)] hover:shadow-[0_30px_55px_rgba(16,185,129,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-white active:scale-[0.98] group relative overflow-hidden text-left"
+                    className="bg-[#FFF0F3]/95 border-2 border-white/60 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(16,185,129,0.2)] hover:shadow-[0_20px_40px_rgba(16,185,129,0.4)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-4">
-                      <div className="p-3.5 bg-emerald-500 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-emerald-500/30">
-                        <Sparkles className="w-5 h-5 animate-pulse" />
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-emerald-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/25">
+                        <Sparkles className="w-4 h-4 animate-pulse" />
                       </div>
-                      <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-emerald-600 transition-colors flex flex-wrap items-center gap-1.5">
-                          <span>Premium AI Subtitle Pro</span>
-                          <span className="text-[7.5px] bg-[#FFF0F3] text-rose-600 border border-rose-300/60 font-extrabold px-2.5 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            FREE • NO API KEY REQUIRED • FOR RECAP VIDEO ONLY
+                      <div className="text-left flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-slate-950 tracking-wide group-hover:text-emerald-700 transition-colors flex items-center justify-between gap-1.5">
+                          <span>AI Subtitle Pro</span>
+                          <span className="text-[7px] bg-[#FFF0F3] text-rose-600 border border-rose-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            FREE • NO API KEY
                           </span>
                         </h3>
-                        <p className="text-xs text-slate-800 font-medium leading-relaxed mt-2.5">
+                        <p className="text-xs text-slate-800 font-normal leading-relaxed mt-1.5">
                           မြန်မာစာလုံးပေါင်း အစီအစဉ်ကို အလိုအလျောက် ညှိပေးမည့်စနစ်။ CapCut အတွက် အဖတ်ရလွယ်ကူပြီး အံကိုက်ဖြစ်စေမည့် .SRT ဖိုင်များကို ထုတ်ပေးသည်။
                         </p>
                       </div>
@@ -444,22 +502,22 @@ export default function PhoneMock({
                   {/* TTS Card */}
                   <div
                     onClick={() => handlePushScreen("tts")}
-                    className="bg-orange-50/95 border-2 border-white/65 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(245,158,11,0.3)] hover:shadow-[0_30px_55px_rgba(245,158,11,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-white active:scale-[0.98] group relative overflow-hidden text-left"
+                    className="bg-orange-50/95 border-2 border-white/60 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(245,158,11,0.2)] hover:shadow-[0_20px_40px_rgba(245,158,11,0.4)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-orange-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-4">
-                      <div className="p-3.5 bg-orange-500 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-orange-500/30">
-                        <Volume2 className="w-5 h-5" />
+                    <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/5 rounded-full blur-xl pointer-events-none" />
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 bg-orange-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-orange-500/25">
+                        <Volume2 className="w-4 h-4" />
                       </div>
-                      <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-orange-600 transition-colors flex flex-wrap items-center gap-1.5">
-                          <span>Text to Voice (စာသားမှ အသံပြောင်းစနစ်)</span>
-                          <span className="text-[7.5px] bg-[#FFF8F0] text-orange-600 border border-orange-200/60 font-extrabold px-2.5 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            FREE • NO API KEY REQUIRED • PRO FEATURES
+                      <div className="text-left flex-1 min-w-0">
+                        <h3 className="text-base font-semibold text-slate-950 tracking-wide group-hover:text-orange-700 transition-colors flex items-center justify-between gap-1.5">
+                          <span>Text to Voice</span>
+                          <span className="text-[7px] bg-[#FFF8F0] text-orange-600 border border-orange-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            FREE • PRO FEATURES
                           </span>
                         </h3>
-                        <p className="text-xs text-slate-800 font-medium leading-relaxed mt-2.5">
-                          စာလုံးရေ ၁၀,၀၀၀ ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
+                        <p className="text-xs text-slate-800 font-normal leading-relaxed mt-1.5">
+                          စာလုံးရေ ၁၀,၀၀0 ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
                         </p>
                       </div>
                     </div>
@@ -560,6 +618,57 @@ export default function PhoneMock({
           </button>
         </div>
       </div>
+
+      {/* CUSTOM HIGH-FIDELITY MOBILE DIALOG BOX */}
+      {dialogState.isOpen && (
+        <div className="absolute inset-0 z-[9999] bg-black/70 backdrop-blur-sm flex items-center justify-center p-5 select-none animate-fade-in">
+          <div className="bg-[#0F172A] border border-slate-800 rounded-3xl w-full max-w-sm p-6 shadow-2xl relative overflow-hidden animate-scale-up text-center">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
+            
+            {/* Modal Icon Header */}
+            <div className="mx-auto w-12 h-12 bg-blue-500/10 text-blue-400 rounded-full flex items-center justify-center mb-4">
+              <Bell className="w-5 h-5" />
+            </div>
+
+            {/* Modal Title */}
+            <h3 className="text-base font-bold text-white tracking-wide mb-2.5">
+              {dialogState.title}
+            </h3>
+
+            {/* Modal Content Message */}
+            <p className="text-xs text-slate-300 leading-relaxed mb-6 whitespace-pre-wrap">
+              {dialogState.message}
+            </p>
+
+            {/* Modal Action Buttons */}
+            <div className="flex items-center gap-3 justify-center">
+              {dialogState.isConfirm ? (
+                <>
+                  <button
+                    onClick={() => handleDialogAction(false)}
+                    className="flex-1 py-2.5 px-4 bg-slate-800 hover:bg-slate-750 border border-slate-755 text-slate-400 hover:text-slate-200 text-xs font-semibold rounded-xl transition-all"
+                  >
+                    မလုပ်တော့ပါ
+                  </button>
+                  <button
+                    onClick={() => handleDialogAction(true)}
+                    className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-md transition-all shadow-blue-500/20"
+                  >
+                    သဘောတူသည်
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => handleDialogAction(true)}
+                  className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl shadow-md transition-all shadow-blue-500/20"
+                >
+                  ကောင်းပါပြီ
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

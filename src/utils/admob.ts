@@ -13,11 +13,22 @@ export async function triggerRewardAd(
   onSuccess: () => void,
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void
 ) {
+  let isCompleted = false;
+  let safetyTimeout: any = null;
+
+  const handleSuccess = () => {
+    if (isCompleted) return;
+    isCompleted = true;
+    if (safetyTimeout) clearTimeout(safetyTimeout);
+    onSuccess();
+  };
+
   try {
     // 1. Prompt the user with a clean, high-fidelity native confirm dialog
-    const confirmed = window.confirm(
-      `🔔 ${promptMessage}\n\nအခမဲ့ အသုံးပြုနိုင်ရန်အတွက် စက္ကန့်အနည်းငယ်ကြာ ဗီဒီယိုကြော်ငြာကို ပြီးဆုံးသည်အထိ ကြည့်ရှုပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။ ကြော်ငြာကြည့်ရှုရန် သဘောတူပါသလား?`
-    );
+    const promptFull = `${promptMessage}\n\nအခမဲ့ အသုံးပြုနိုင်ရန်အတွက် စက္ကန့်အနည်းငယ်ကြာ ဗီဒီယိုကြော်ငြာကို ပြီးဆုံးသည်အထိ ကြည့်ရှုပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။ ကြော်ငြာကြည့်ရှုရန် သဘောတူပါသလား?`;
+    const confirmed = typeof (window as any).customConfirm === "function"
+      ? await (window as any).customConfirm(promptFull, "ဗီဒီယိုကြော်ငြာကြည့်ရှုရန်")
+      : window.confirm(promptFull);
 
     if (!confirmed) {
       onAddNotification(
@@ -28,7 +39,20 @@ export async function triggerRewardAd(
       return;
     }
 
-    onAddNotification("ကြော်ငြာစတင်နေပါသည်", "ဗီဒီယိုကြော်ငြာကို စတင်ဖွင့်လှစ်နေပါသည်။ ဆုံးအောင်ကြည့်ပေးပါ။", "info");
+    onAddNotification("ကြော်ငြာတင်နေပါသည်", "ဗီဒီယိုကြော်ငြာကို စတင်ဖွဲ့စည်းနေပါသည်။ ပြီးဆုံးသည်အထိ ခေတ္တစောင့်ဆိုင်းပါ။", "info");
+
+    // Setup 5-second safety fallback timeout handler on the loader/ad state
+    safetyTimeout = setTimeout(() => {
+      if (!isCompleted) {
+        console.warn("[AdMob Timeout] Safety fallback triggered after 5 seconds of loading");
+        onAddNotification(
+          "စမ်းသပ်မှုစနစ် (Bypassed)",
+          "ကြော်ငြာ ဆာဗာအလုပ်မလုပ်သေးသောကြောင့် ကျော်ဖြတ်ပြီး အောင်မြင်စွာ ခွင့်ပြုလိုက်သည်။",
+          "success"
+        );
+        handleSuccess();
+      }
+    }, 5000);
 
     // 2. Prepare the Reward Video Ad using the official test ID
     await AdMob.prepareRewardVideoAd({
@@ -51,13 +75,17 @@ export async function triggerRewardAd(
 
       if (adRewarded) {
         onAddNotification("🎉 အောင်မြင်ပါသည်", "ကြော်ငြာကြည့်ရှုခြင်း ပြီးဆုံးသဖြင့် လုပ်ဆောင်ချက်ကို ခွင့်ပြုလိုက်ပါပြီ။", "success");
-        onSuccess();
+        handleSuccess();
       } else {
-        onAddNotification(
-          "ကြော်ငြာမပြီးဆုံးသေးပါ",
-          "ကြော်ငြာကို ဆုံးအောင်ကြည့်မှသာ ဤစနစ်ကို အသုံးပြုခွင့်ရရှိပါမည်။",
-          "warning"
-        );
+        // If they close without earning reward, check if safety timeout didn't already bypass them
+        if (!isCompleted) {
+          if (safetyTimeout) clearTimeout(safetyTimeout);
+          onAddNotification(
+            "ကြော်ငြာမပြီးဆုံးသေးပါ",
+            "ကြော်ငြာကို ဆုံးအောင်ကြည့်မှသာ ဤစနစ်ကို အသုံးပြုခွင့်ရရှိပါမည်။",
+            "warning"
+          );
+        }
       }
     });
 
@@ -72,6 +100,6 @@ export async function triggerRewardAd(
       "Browser Preview အောက်တွင် စမ်းသပ်နေသဖြင့် ကြော်ငြာကို ကျော်ဖြတ်ပြီး အောင်မြင်စွာ ခွင့်ပြုလိုက်သည်။",
       "success"
     );
-    onSuccess();
+    handleSuccess();
   }
 }

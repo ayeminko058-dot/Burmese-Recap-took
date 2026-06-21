@@ -34,6 +34,14 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
+  const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
+    if (typeof (window as any).customAlert === "function") {
+      await (window as any).customAlert(message, title);
+    } else {
+      alert(message);
+    }
+  };
+
   const charCount = text.length;
   const chunkEstimate = Math.ceil(charCount / 180);
 
@@ -90,10 +98,12 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "Accept": "audio/mpeg, */*"
         },
         body: JSON.stringify({
-          text,
+          text: text.trim(),
           voice: selectedVoice,
+          style: selectedStyle,
           rate: computedRate,
           pitch: computedPitch,
         }),
@@ -102,10 +112,14 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
       clearInterval(progressTimer);
 
       if (!response.ok) {
-        throw new Error("Local synthesis proxy returned an error. Check key quotas.");
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error || "Local synthesis proxy returned an error. Check key quotas.");
       }
 
       const audioBlob = await response.blob();
+      if (!audioBlob || audioBlob.size === 0) {
+        throw new Error("Received an empty audio binary stream from synthesis server.");
+      }
       const localUrl = URL.createObjectURL(audioBlob);
 
       setSyncedAudioUrl(localUrl);
@@ -174,8 +188,8 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
             recursive: true,
           });
 
-          setIsDownloading(false);
-          alert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+           setIsDownloading(false);
+          await triggerAlert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", "အောင်မြင်ပါသည်");
           onAddNotification("Download Success", "MP3 saved to native Download folder.", "success");
         } catch (err) {
           console.warn("[File System Fallback] Native directories unavailable, writing via browser anchor:", err);
@@ -188,12 +202,12 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
             document.body.removeChild(link);
             
             setIsDownloading(false);
-            alert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+            await triggerAlert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", "အောင်မြင်ပါသည်");
             onAddNotification("Download Success", "MP3 downloaded via browser.", "success");
           } catch (browserErr) {
             console.error("MP3 final download loop error:", browserErr);
             setIsDownloading(false);
-            alert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။");
+            await triggerAlert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။", "အမှားအယွင်း");
           }
         }
       },
