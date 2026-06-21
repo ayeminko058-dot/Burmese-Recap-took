@@ -2,6 +2,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { 
   Volume2, Play, Pause, Download, Settings, Disc, Sparkles, RefreshCw, Layers, CheckCircle 
 } from "lucide-react";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { triggerRewardAd } from "../utils/admob";
 import { VoiceOption } from "../types";
 
 export const VOICE_MATRIX: VoiceOption[] = [
@@ -24,10 +26,12 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
     "ပရိသတ်ကြီးခင်ဗျာ။ ယနေ့ တင်ဆက်ပေးမယ့် ဇာတ်ကားကတော့ နာမည်ကျော် မင်းသားကြီးရဲ့ ဂန္ထဝင် စွန့်စားခန်း ဇာတ်လမ်းတစ်ပုဒ်ပဲ ဖြစ်ပါတယ်။ နောက်ဆုံးအချိန်အထိ စိတ်လှုပ်ရှားစွာနဲ့ ကြည့်ရှုရမှာမို့ ဗီဒီယိုလေးကို Like and Subbed လုပ်ပေးခဲ့ကြပါဦး။"
   );
   const [selectedVoice, setSelectedVoice] = useState("my-MM-NilarNeural");
+  const [selectedStyle, setSelectedStyle] = useState("general");
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [syncedAudioUrl, setSyncedAudioUrl] = useState<string | null>(null);
   const [audioPlayState, setAudioPlayState] = useState(false);
   const [progressLog, setProgressLog] = useState("");
+  const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const charCount = text.length;
@@ -53,6 +57,35 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
         }
       }, 700);
 
+      const normalizedStyle = selectedStyle.toLowerCase();
+      let computedRate = "+0%";
+      let computedPitch = "+0Hz";
+
+      if (
+        normalizedStyle.includes("cheerful") ||
+        normalizedStyle.includes("တက်ကြွသံ") ||
+        normalizedStyle.includes("ပျော်ရွှင်သံ")
+      ) {
+        computedRate = "+12%";
+        computedPitch = "+6Hz";
+      } else if (
+        normalizedStyle.includes("newscast") ||
+        normalizedStyle.includes("သတင်းဖတ်သံ")
+      ) {
+        computedRate = "+5%";
+        computedPitch = "-2Hz";
+      } else if (
+        normalizedStyle.includes("chat") ||
+        normalizedStyle.includes("စကားပြောသံ") ||
+        normalizedStyle.includes("စကားပြော")
+      ) {
+        computedRate = "+8%";
+        computedPitch = "+0Hz";
+      } else {
+        computedRate = "+0%";
+        computedPitch = "+0Hz";
+      }
+
       const response = await fetch("/api/tts", {
         method: "POST",
         headers: {
@@ -61,6 +94,8 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
         body: JSON.stringify({
           text,
           voice: selectedVoice,
+          rate: computedRate,
+          pitch: computedPitch,
         }),
       });
 
@@ -108,12 +143,62 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
 
   const handleDownloadMp3 = () => {
     if (!syncedAudioUrl) return;
-    const fileName = `Burmese_Vocal_${Date.now().toString().slice(-4)}.mp3`;
-    const link = document.createElement("a");
-    link.href = syncedAudioUrl;
-    link.download = fileName;
-    link.click();
-    onAddNotification("Vocal Track Downloaded", "MP3 file successfully compiled and saved.", "success");
+
+    triggerRewardAd(
+      "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး MP3 အခမဲ့ဒေါင်းလုဒ်ဆွဲပါ",
+      async () => {
+        setIsDownloading(true);
+        const fileName = `ZoeRecap_${Date.now()}.mp3`;
+        try {
+          // Fetch raw audio blob
+          const res = await fetch(syncedAudioUrl);
+          const blob = await res.blob();
+          
+          // Convert to base64
+          const reader = new FileReader();
+          const base64Promise = new Promise<string>((resolve, reject) => {
+            reader.onloadend = () => {
+              const resStr = reader.result as string;
+              resolve(resStr.split(",")[1]);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+          });
+          const base64Data = await base64Promise;
+
+          // Write natively to external storage Download folder
+          await Filesystem.writeFile({
+            path: `Download/${fileName}`,
+            data: base64Data,
+            directory: Directory.ExternalStorage,
+            recursive: true,
+          });
+
+          setIsDownloading(false);
+          alert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+          onAddNotification("Download Success", "MP3 saved to native Download folder.", "success");
+        } catch (err) {
+          console.warn("[File System Fallback] Native directories unavailable, writing via browser anchor:", err);
+          try {
+            const link = document.createElement("a");
+            link.href = syncedAudioUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            setIsDownloading(false);
+            alert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+            onAddNotification("Download Success", "MP3 downloaded via browser.", "success");
+          } catch (browserErr) {
+            console.error("MP3 final download loop error:", browserErr);
+            setIsDownloading(false);
+            alert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။");
+          }
+        }
+      },
+      onAddNotification
+    );
   };
 
   useEffect(() => {
@@ -139,7 +224,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
               <Volume2 className="w-5 h-5 animate-pulse" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-wide text-slate-100">Edge TTS Studio</h2>
+              <h2 className="text-sm font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
               <p className="text-[10px] text-slate-400">Ultra Long-form Myanmar Voice Engrave</p>
             </div>
           </div>
@@ -156,20 +241,46 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
             </span>
           </div>
 
-          <div className="relative">
-            <select
-              value={selectedVoice}
-              onChange={(e) => setSelectedVoice(e.target.value)}
-              className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
-            >
-              {VOICE_MATRIX.map((v) => (
-                <option key={v.code} value={v.code} className="bg-[#1A2333]">
-                  {v.flag} {v.name} ({v.language})
-                </option>
-              ))}
-            </select>
-            <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
-              <Settings className="w-3.5 h-3.5" />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-[10.5px] text-slate-400 font-medium font-sans">Voice Speaker (အသံရွေးချယ်ရန်)</label>
+              <div className="relative">
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+                >
+                  {VOICE_MATRIX.map((v) => (
+                    <option key={v.code} value={v.code} className="bg-[#1A2333]">
+                      {v.flag} {v.name} ({v.language})
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
+                  <Settings className="w-3.5 h-3.5" />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <label className="text-[10.5px] text-slate-400 font-medium font-sans">Voice Style (အသံအနေအထားပုံစံ)</label>
+              <div className="relative">
+                <select
+                  value={selectedStyle}
+                  onChange={(e) => setSelectedStyle(e.target.value)}
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+                >
+                  <option value="general" className="bg-[#1A2333]">General (ရိုးရိုး)</option>
+                  <option value="chat" className="bg-[#1A2333]">Chat (စကားပြော)</option>
+                  <option value="customerservice" className="bg-[#1A2333]">Customer Service (ဝန်ဆောင်မှုအသံ)</option>
+                  <option value="newscast" className="bg-[#1A2333]">Newscast (သတင်းဖတ်သံ)</option>
+                  <option value="cheerful" className="bg-[#1A2333]">Cheerful (ပျော်ရွှင်သံ)</option>
+                  <option value="empathetic" className="bg-[#1A2333]">Empathetic (စာနာသံ)</option>
+                </select>
+                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -262,10 +373,20 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
 
             <button
               onClick={handleDownloadMp3}
-              className="w-full bg-[#1A2333] hover:bg-slate-800 border border-[#1E293B] text-slate-200 text-xs py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5"
+              disabled={isDownloading}
+              className="w-full bg-[#1A2333] hover:bg-slate-800 disabled:bg-slate-800 disabled:opacity-70 border border-[#1E293B] text-slate-200 text-xs py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5"
             >
-              <Download className="w-3.5 h-3.5" />
-              Download MP3 Track
+              {isDownloading ? (
+                <>
+                  <div className="w-3.5 h-3.5 border-2 border-t-transparent border-slate-300 rounded-full animate-spin" />
+                  <span>Downloading... (ဒေါင်းလုဒ်ဆွဲနေသည်...)</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download MP3 Track</span>
+                </>
+              )}
             </button>
           </div>
         )}

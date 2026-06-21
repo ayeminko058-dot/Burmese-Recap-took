@@ -1,641 +1,907 @@
-import React, { useState, useEffect } from "react";
-import { Download, Play, Pause, RotateCw, CheckCircle, AlertCircle, FileText, Globe } from "lucide-react";
+import React, { useState, useEffect, useRef } from "react";
+import { 
+  FileAudio, FileVideo, Mic, Loader2, Play, 
+  Copy, Check, Download, AlertCircle, ShieldCheck, 
+  Sparkles, CheckCircle2, Trash2, Key, RefreshCw, Eye, EyeOff, Share2, HelpCircle
+} from "lucide-react";
+import { triggerRewardAd } from "../utils/admob";
 import { DownloadTask } from "../types";
 
 interface VideoDownloaderProps {
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
-  tasks: DownloadTask[];
-  setTasks: React.Dispatch<React.SetStateAction<DownloadTask[]>>;
+  tasks?: DownloadTask[];
+  setTasks?: React.Dispatch<React.SetStateAction<DownloadTask[]>>;
+  onAddDownloadedFile?: (name: string, data: string, type: "srt" | "audio" | "video", audioUrl?: string, url?: string) => void;
+  onQuickAccessSettings?: () => void;
 }
 
-interface FetchedFormat {
-  quality: string;
-  size: string;
-  url: string;
-}
-
-interface FetchedMetadata {
-  title: string;
-  preview_url: string;
-  formats: FetchedFormat[];
-}
-
-export default function VideoDownloader({ onAddNotification, tasks, setTasks }: VideoDownloaderProps) {
-  const [url, setUrl] = useState("");
-  const [isUrlFocused, setIsUrlFocused] = useState(false);
-  const [isFetching, setIsFetching] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+export default function VideoDownloader({ 
+  onAddNotification, 
+  onAddDownloadedFile,
+  onQuickAccessSettings
+}: VideoDownloaderProps) {
   
-  const [fetchedMetadata, setFetchedMetadata] = useState<FetchedMetadata | null>(null);
-  const [selectedFormatIndex, setSelectedFormatIndex] = useState<number>(0);
+  // Local API Key management states
+  const [apiKey, setApiKey] = useState<string>("");
+  const [showKey, setShowKey] = useState<boolean>(false);
+  const [apiKeySet, setApiKeySet] = useState<boolean>(false);
+  const [keyValidationStatus, setKeyValidationStatus] = useState<"idle" | "validating" | "valid" | "unconfigured" | "invalid">("idle");
+  const [validationError, setValidationError] = useState<string | null>(null);
 
-  // 1. API Integration on Fetch/Enter Query
-  const handleFetchMetadata = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!url.trim()) return;
+  // File states
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileDetails, setFileDetails] = useState<{
+    name: string;
+    size: string;
+    type: "audio" | "video";
+    durationStr: string;
+    durationSecs: number;
+    rawType: string;
+  } | null>(null);
 
-    setIsFetching(true);
-    setErrorMsg(null);
-    setFetchedMetadata(null);
+  // Transcription states
+  const [status, setStatus] = useState<"idle" | "extracting_audio" | "transcribing" | "completed" | "error">("idle");
+  const [progress, setProgress] = useState<number>(0);
+  const [activeTab, setActiveTab] = useState<"transcript" | "srt">("transcript");
+  const [plainTranscript, setPlainTranscript] = useState<string>("");
+  const [srtSubtitles, setSrtSubtitles] = useState<string>("");
+  const [copied, setCopied] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-    const inputUrl = url.trim();
+  // Drag and Drop interaction state
+  const [isDragging, setIsDragging] = useState<boolean>(false);
+
+  // Refs
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load API Key from local storage on mount
+  useEffect(() => {
+    const savedKey = localStorage.getItem("gemini_api_key") || "";
+    setApiKey(savedKey);
+    setApiKeySet(!!savedKey);
+    if (savedKey) {
+      setKeyValidationStatus("valid"); // Assume valid initially, user can re-validate
+    } else {
+      setKeyValidationStatus("unconfigured");
+    }
+  }, []);
+
+  const handleSaveApiKey = () => {
+    if (!apiKey.trim()) {
+      onAddNotification("API Key Required", "Please enter a valid Gemini API Key first.", "warning");
+      return;
+    }
+    localStorage.setItem("gemini_api_key", apiKey.trim());
+    setApiKeySet(true);
+    setKeyValidationStatus("idle");
+    onAddNotification("API Key Saved", "Gemini API Key saved securely in your local browser storage.", "success");
+    
+    // Dispatch an event to notify sibling components (like Translator) that API key has changed
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const handleClearApiKey = () => {
+    localStorage.removeItem("gemini_api_key");
+    setApiKey("");
+    setApiKeySet(false);
+    setKeyValidationStatus("unconfigured");
+    setValidationError(null);
+    onAddNotification("Key Removed", "Gemini API Key purged from local storage.", "warning");
+    
+    // Dispatch event
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const handleValidateApiKey = async () => {
+    const keyToValidate = apiKey.trim();
+    if (!keyToValidate) {
+      onAddNotification("Input Required", "Please enter or paste an API key to validate.", "warning");
+      return;
+    }
+
+    setKeyValidationStatus("validating");
+    setValidationError(null);
 
     try {
-      onAddNotification("API Pipeline Initiated", "Performing lookup on Vercel Downloader API...", "info");
-      
-      const response = await fetch("https://universal-downloader-api-nu.vercel.app/api/download", {
+      const response = await fetch("/api/validate-key", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Gemini-API-Key": keyToValidate,
         },
-        body: JSON.stringify({ url: inputUrl }),
       });
-
-      if (!response.ok) {
-        throw new Error(`API returned error response status: ${response.status}`);
-      }
 
       const data = await response.json();
-      
-      // Extract properties based on backend payload schema & normalize fallbacks gracefully
-      const title = data.title || `Recap_Media_${Date.now().toString().slice(-4)}`;
-      const preview_url = data.preview_url || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop";
-      
-      // Standardize formatting list
-      let formats: FetchedFormat[] = data.formats || [];
-      if (!Array.isArray(formats) || formats.length === 0) {
-        // Fallback quality targets if not parsed by service
-        formats = [
-          { quality: "1080p (HQ Resolution)", size: "45.2 MB", url: inputUrl },
-          { quality: "720p (HD Resolution)", size: "23.8 MB", url: inputUrl },
-          { quality: "Audio Track Only (Vocal)", size: "5.4 MB", url: inputUrl }
-        ];
+
+      if (response.ok && data.valid) {
+        setKeyValidationStatus("valid");
+        onAddNotification("Validation Success", "Gemini API Key is valid and working!", "success");
       } else {
-        // Sanitize API formats to guarantee each format has valid url property mapping
-        formats = formats.map((f, index) => ({
-          quality: f.quality || `${720 - index * 120}p`,
-          size: f.size || `${(30 - index * 8).toFixed(1)} MB`,
-          url: f.url || inputUrl
-        }));
+        setKeyValidationStatus("invalid");
+        setValidationError(data.error || "The key appears to be invalid or unsupported.");
+        onAddNotification("Validation Failed", "Google rejected the requested key credentials.", "warning");
       }
-
-      setFetchedMetadata({
-        title,
-        preview_url,
-        formats
-      });
-      setSelectedFormatIndex(0);
-      onAddNotification("Extraction Successful", `Fetched formats for: ${title}`, "success");
     } catch (err: any) {
-      console.warn("Vercel download API fetch error, initializing high-fidelity sandbox simulation mode:", err);
-      setErrorMsg(err.message || "Network request unsuccessful. Fallback to offline stream simulation.");
-      onAddNotification("Proxy Fallback", "Loaded cached sandbox emulator schemas.", "warning");
-
-      // Custom offline simulation matching actual production formats
-      const mockTitle = inputUrl.includes("youtube.com") || inputUrl.includes("youtu.be")
-        ? `Myanmar_YT_Syllable_Recap_${Date.now().toString().slice(-4)}.mp4`
-        : inputUrl.includes("tiktok.com")
-        ? `Burmese_TikTok_Trends_Recap_${Date.now().toString().slice(-4)}.mp4 animate`
-        : `Recap_Studio_Media_${Date.now().toString().slice(-4)}.mp4`;
-
-      setFetchedMetadata({
-        title: mockTitle,
-        preview_url: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop",
-        formats: [
-          { quality: "1080p (Premium Ultra-HD)", size: "51.4 MB", url: inputUrl },
-          { quality: "720p (Standard HD)", size: "26.3 MB", url: inputUrl },
-          { quality: "Audio-MP3 Vocal Extract", size: "7.1 MB", url: inputUrl }
-        ]
-      });
-      setSelectedFormatIndex(0);
-    } finally {
-      setIsFetching(false);
+      console.error(err);
+      setKeyValidationStatus("invalid");
+      setValidationError(err.message || "Failed to establish validation handshake with the server.");
+      onAddNotification("Network Error", "Handshake validation failed.", "warning");
     }
   };
 
-  // Safe file loader pipeline fetching as Blob and emitting download
-  const runFileStreamDownload = async (taskId: string, downloadUrl: string, cleanTitle: string, sizeMB: number) => {
+  // Helper functions for Web Audio extraction & resampling down to 16kHz WAV
+  const encodeMonoFloat32ToWav = (samples: Float32Array, sampleRate: number): Blob => {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+    
+    const writeString = (v: DataView, offset: number, str: string) => {
+      for (let i = 0; i < str.length; i++) {
+        v.setUint8(offset + i, str.charCodeAt(i));
+      }
+    };
+
+    const floatTo16BitPCM = (v: DataView, offset: number, input: Float32Array) => {
+      for (let i = 0; i < input.length; i++, offset += 2) {
+        let s = Math.max(-1, Math.min(1, input[i]));
+        v.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      }
+    };
+
+    /* RIFF identifier */
+    writeString(view, 0, 'RIFF');
+    /* file length */
+    view.setUint32(4, 36 + samples.length * 2, true);
+    /* RIFF type */
+    writeString(view, 8, 'WAVE');
+    /* format chunk identifier */
+    writeString(view, 12, 'fmt ');
+    /* format chunk length */
+    view.setUint32(16, 16, true);
+    /* sample format (PCM) */
+    view.setUint16(20, 1, true);
+    /* channel count (mono) */
+    view.setUint16(22, 1, true);
+    /* sample rate */
+    view.setUint32(24, sampleRate, true);
+    /* byte rate (sample rate * block align) */
+    view.setUint32(28, sampleRate * 2, true);
+    /* block align */
+    view.setUint16(32, 2, true);
+    /* bits per sample */
+    view.setUint16(34, 16, true);
+    /* data chunk identifier */
+    writeString(view, 36, 'data');
+    /* data chunk length */
+    view.setUint32(40, samples.length * 2, true);
+    
+    floatTo16BitPCM(view, 44, samples);
+    
+    return new Blob([view], { type: 'audio/wav' });
+  };
+
+  // Process selected file
+  const processSelectedFile = (file: File) => {
+    const extension = file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase();
+    const isAudio = ["mp3", "wav", "m4a", "aac"].includes(extension) || file.type.startsWith("audio/");
+    const isVideo = ["mp4", "mov", "mkv", "webm"].includes(extension) || file.type.startsWith("video/");
+
+    if (!isAudio && !isVideo) {
+      onAddNotification(
+        "Supported Files Only", 
+        "Selected format is not supported. Please pick a valid audio or video file.", 
+        "warning"
+      );
+      return;
+    }
+
+    const sizeStr = (file.size / (1024 * 1024)).toFixed(2) + " MB";
+    setSelectedFile(file);
+    setFileDetails({
+      name: file.name,
+      size: sizeStr,
+      type: isVideo ? "video" : "audio",
+      durationStr: "Calculating...",
+      durationSecs: 0,
+      rawType: file.type || `media/${extension}`
+    });
+
+    setPlainTranscript("");
+    setSrtSubtitles("");
+    setErrorMsg(null);
+    setStatus("idle");
+    setProgress(0);
+
+    // Get exact media duration using temporary element
     try {
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, status: "downloading" } : t));
+      const url = URL.createObjectURL(file);
+      const mediaEl = document.createElement(isVideo ? "video" : "audio");
+      mediaEl.src = url;
+      mediaEl.onloadedmetadata = () => {
+        const d = mediaEl.duration;
+        const mins = Math.floor(d / 60);
+        const secs = Math.floor(d % 60);
+        setFileDetails(prev => prev ? {
+          ...prev,
+          durationStr: `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`,
+          durationSecs: Math.max(1, Math.ceil(d))
+        } : null);
+        URL.revokeObjectURL(url);
+      };
       
-      const fileResponse = await fetch(downloadUrl);
-      if (!fileResponse.ok) {
-        throw new Error("Target file resource server refused link");
+      mediaEl.onerror = () => {
+        setFileDetails(prev => prev ? {
+          ...prev,
+          durationStr: "Unknown",
+          durationSecs: 0
+        } : null);
+        URL.revokeObjectURL(url);
+      };
+    } catch (e) {
+      console.warn("Duration lookup error:", e);
+    }
+
+    onAddNotification("File Loaded", `Successfully mounted "${file.name}" for local conversion.`, "success");
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      processSelectedFile(e.dataTransfer.files[0]);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      processSelectedFile(e.target.files[0]);
+    }
+  };
+
+  // Convert files to base64 helper
+  const convertBlobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const resultStr = reader.result as string;
+        const base64Data = resultStr.split(",")[1];
+        resolve(base64Data);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
+
+  // Transcribe process
+  const triggerTranscription = async (formatSelection: "txt" | "srt") => {
+    if (!selectedFile) {
+      onAddNotification("File Required", "Please select an audio or video file first.", "warning");
+      return;
+    }
+
+    const savedKey = localStorage.getItem("gemini_api_key") || "";
+    if (!savedKey) {
+      onAddNotification("API Key Missing", "Configure your Gemini API settings to enable speech transcription.", "warning");
+      return;
+    }
+
+    setStatus("extracting_audio");
+    setProgress(15);
+    setErrorMsg(null);
+
+    try {
+      onAddNotification("Extracting Audio", "Parsing raw audio tracks using Web Audio graph...", "info");
+      
+      // Load standard array buffer
+      const arrayBuffer = await selectedFile.arrayBuffer();
+      
+      // Create native Audio Context
+      const AudioCtxConstructor = window.AudioContext || (window as any).webkitAudioContext;
+      const audioCtx = new AudioCtxConstructor();
+
+      let originalBuffer: AudioBuffer;
+      try {
+        originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      } catch (decodeErr) {
+        throw new Error("Local audio decoding failed. Ensure this media contains a valid, non-corrupt sound track.");
       }
 
-      const contentLength = fileResponse.headers.get("content-length");
-      const totalBytes = contentLength ? parseInt(contentLength, 10) : Math.round(sizeMB * 1024 * 1024);
+      setProgress(40);
+      setStatus("transcribing");
+      onAddNotification("Resampling Audio", "Downscaling sound stream to 16kHz mono PCM...", "info");
+
+      // Set target resample params
+      const targetRate = 16000;
+      const targetChannels = 1;
+      const duration = originalBuffer.duration;
+      const targetSamples = Math.round(duration * targetRate);
+
+      const offlineCtx = new OfflineAudioContext(targetChannels, targetSamples, targetRate);
+      const bufferSource = offlineCtx.createBufferSource();
+      bufferSource.buffer = originalBuffer;
+      bufferSource.connect(offlineCtx.destination);
+      bufferSource.start();
+
+      const resampledBuffer = await offlineCtx.startRendering();
+      const pcmMonoData = resampledBuffer.getChannelData(0);
+
+      // Close base context to free up memory
+      await audioCtx.close();
+
+      setProgress(60);
+
+      // Convert Float32 Mono samples to standard 16-bit WAV
+      const wavBlob = encodeMonoFloat32ToWav(pcmMonoData, targetRate);
       
-      const reader = fileResponse.body?.getReader();
-      if (!reader) {
-        throw new Error("Payload readable stream unavailable");
+      // Convert to Base64
+      const wavBase64 = await convertBlobToBase64(wavBlob);
+      
+      setProgress(75);
+      onAddNotification("Uploading to Gemini", "Transcribing speech on-device through Gemini API...", "info");
+
+      // Post payload to Express route proxy
+      const response = await fetch("/api/transcribe", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Gemini-API-Key": savedKey,
+        },
+        body: JSON.stringify({
+          audioData: wavBase64,
+          mimeType: "audio/wav",
+          format: formatSelection,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to compile transcription.");
       }
 
-      let receivedBytes = 0;
-      const chunks: Uint8Array[] = [];
-      const startTime = Date.now();
+      const resultText = data.output || "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        
-        chunks.push(value);
-        receivedBytes += value.length;
+      // Intercept with Reward Ad before displaying results to user
+      triggerRewardAd(
+        "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာသားအဖြေကို ရယူပါ",
+        () => {
+          if (formatSelection === "srt") {
+            setSrtSubtitles(resultText);
+            setActiveTab("srt");
+            // Also generate fallback plain text by stripping srt lines
+            const strippedText = resultText.replace(/\d+\r?\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\r?\n/g, "").replace(/\r?\n\r?\n/g, "\n");
+            setPlainTranscript(strippedText.trim());
+          } else {
+            setPlainTranscript(resultText);
+            setActiveTab("transcript");
+            // Create an approximate SRT mapping if user selected TXT but clicks SRT later
+            const lines = resultText.split(/\r?\n/).filter((l: string) => l.trim().length > 0);
+            let approxSrt = "";
+            lines.forEach((line: string, idx: number) => {
+              const step = 4;
+              const startSec = idx * step;
+              const endSec = (idx + 1) * step;
+              const fmtTime = (s: number) => {
+                const h = Math.floor(s / 3600).toString().padStart(2, "0");
+                const m = Math.floor((s % 3600) / 60).toString().padStart(2, "0");
+                const sec = Math.floor(s % 60).toString().padStart(2, "0");
+                return `${h}:${m}:${sec},000`;
+              };
+              approxSrt += `${idx + 1}\n${fmtTime(startSec)} --> ${fmtTime(endSec)}\n${line}\n\n`;
+            });
+            setSrtSubtitles(approxSrt.trim());
+          }
 
-        const progressPercent = Math.min(100, Math.round((receivedBytes / totalBytes) * 100));
-        const timePassed = (Date.now() - startTime) / 1000;
-        const currentSpeedMBs = timePassed > 0 ? parseFloat((receivedBytes / (1024 * 1024) / timePassed).toFixed(1)) : 1.2;
-        const downloadedMB = parseFloat((receivedBytes / (1024 * 1024)).toFixed(1));
-        const totalMB = parseFloat((totalBytes / (1024 * 1024)).toFixed(1));
+          setProgress(100);
+          setStatus("completed");
+          onAddNotification("Transcription Finished", "Successfully compiled audio text track.", "success");
 
-        setTasks(prev => prev.map(t => t.id === taskId ? {
-          ...t,
-          progress: progressPercent,
-          downloadedMB,
-          totalMB,
-          speedMBs: currentSpeedMBs,
-        } : t));
-      }
+          // Save into Downloads History
+          if (onAddDownloadedFile && selectedFile) {
+            const baseName = selectedFile.name.replace(/\.[^/.]+$/, "");
+            if (formatSelection === "srt") {
+              onAddDownloadedFile(`${baseName}_subtitles.srt`, resultText, "srt");
+            } else {
+              onAddDownloadedFile(`${baseName}_transcript.txt`, resultText, "srt"); 
+            }
+          }
+        },
+        onAddNotification
+      );
 
-      const blob = new Blob(chunks, { type: "video/mp4" });
-      const objectUrl = URL.createObjectURL(blob);
-      
+    } catch (err: any) {
+      console.error(err);
+      setStatus("error");
+      setErrorMsg(err.message || "Decoding error during local PCM audio stream conversion.");
+      onAddNotification("Transcription Failed", err.message || "Failed to process audio matrix.", "warning");
+    }
+  };
+
+  const handleCopyResult = () => {
+    const text = activeTab === "transcript" ? plainTranscript : srtSubtitles;
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    onAddNotification("Copied Result", "Transcript copied safely to clipboard.", "success");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleDownloadBlob = (ext: "txt" | "srt") => {
+    const content = ext === "txt" ? plainTranscript : srtSubtitles;
+    if (!content) return;
+
+    try {
+      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
-      link.href = objectUrl;
-      link.download = cleanTitle;
+      const cleanName = selectedFile?.name.replace(/\.[^/.]+$/, "") || "gemini_transcription";
+      link.href = url;
+      link.download = `${cleanName}_compiled.${ext}`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      URL.revokeObjectURL(objectUrl);
-
-      setTasks(prev => prev.map(t => t.id === taskId ? {
-        ...t,
-        status: "completed",
-        progress: 100,
-        completedAt: new Date().toLocaleTimeString()
-      } : t));
-
-      onAddNotification("Download Successful", `Saved ${cleanTitle} cleanly to Gallery folder!`, "success");
-
-    } catch (err: any) {
-      console.warn("Real browser stream fetch blocked (likely CORS or browser limitation). Switching to direct client anchor fallback:", err);
-      
-      // Update task info so standard simulated micro-timer runs for the UI
-      setTasks(prev => prev.map(t => t.id === taskId ? { ...t, isRealStream: false } as any : t));
-      
-      // Trigger native download action via anchor tag targeting format URL
-      try {
-        const fallbackLink = document.createElement("a");
-        fallbackLink.href = downloadUrl;
-        fallbackLink.target = "_blank";
-        fallbackLink.rel = "noopener noreferrer";
-        fallbackLink.download = cleanTitle;
-        document.body.appendChild(fallbackLink);
-        fallbackLink.click();
-        document.body.removeChild(fallbackLink);
-      } catch (e) {
-        console.error("Direct browser download fail", e);
-      }
+      URL.revokeObjectURL(url);
+      onAddNotification("File Exported", `Successful extraction of standard .${ext.toUpperCase()}`, "success");
+    } catch (err) {
+      onAddNotification("Download Blocked", "Your device browser restricted instant file saves.", "warning");
     }
   };
 
-  // Trigger background action
-  const handleStartDownload = () => {
-    if (!fetchedMetadata) return;
-    const format = fetchedMetadata.formats[selectedFormatIndex];
-    if (!format) return;
-
-    const taskId = `dl_${Date.now()}`;
-    const fileBase = fetchedMetadata.title.replace(/[^a-zA-Z0-9_\-.]/g, "_");
-    const qualitySuffix = format.quality.replace(/[^a-zA-Z0-9]/g, "");
-    const isAudio = format.quality.toLowerCase().includes("audio") || format.quality.toLowerCase().includes("mp3");
-    const cleanTitle = `${fileBase}_${qualitySuffix}.${isAudio ? "mp3" : "mp4"}`;
+  const handleShareResult = async () => {
+    const content = activeTab === "transcript" ? plainTranscript : srtSubtitles;
+    if (!content) return;
     
-    let sizeMB = 15.0;
-    const match = format.size.match(/([\d.]+)/);
-    if (match) {
-      sizeMB = parseFloat(match[1]);
-    }
-
-    const newTask: DownloadTask = {
-      id: taskId,
-      title: cleanTitle,
-      url: format.url || url,
-      progress: 0,
-      speedMBs: 0,
-      downloadedMB: 0,
-      totalMB: sizeMB,
-      status: "queued",
-      category: isAudio ? "audio" : "video",
-      isRealStream: true,
-      downloadUrl: format.url, // Save format url specifically for retries
-    } as any;
-
-    setTasks((prev) => [newTask, ...prev]);
-    onAddNotification("Download Queued", `Initializing background worker thread for: ${cleanTitle}`, "info");
-
-    runFileStreamDownload(taskId, format.url || url, cleanTitle, sizeMB);
-  };
-
-  // Active micro-task daemon intervals for simulated tasks
-  useEffect(() => {
-    const activeIntervals = setInterval(() => {
-      setTasks((prevTasks) => {
-        let changed = false;
-        const nextTasks = prevTasks.map((task) => {
-          // Only simulation ticks if task is not flagged as a live stream
-          if (task.status === "downloading" && !(task as any).isRealStream) {
-            changed = true;
-            const randomSpeed = parseFloat((Math.random() * 3.5 + 1.2).toFixed(1));
-            const addMb = randomSpeed * 0.3;
-            const nextDownloaded = parseFloat(Math.min(task.totalMB, task.downloadedMB + addMb).toFixed(1));
-            const nextProgress = Math.min(100, Math.round((nextDownloaded / task.totalMB) * 100));
-            const isCompleted = nextDownloaded >= task.totalMB;
-
-            return {
-              ...task,
-              downloadedMB: nextDownloaded,
-              progress: nextProgress,
-              speedMBs: isCompleted ? 0 : randomSpeed,
-              status: isCompleted ? "completed" : "downloading",
-              completedAt: isCompleted ? new Date().toLocaleTimeString() : undefined,
-            } as DownloadTask;
-          }
-          return task;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: "Gemini Transcription Export",
+          text: content.slice(0, 1000),
         });
-
-        const completedTask = prevTasks.find(
-          (t, index) => t.status === "downloading" && nextTasks[index].status === "completed" && !(t as any).isRealStream
-        );
-        if (completedTask) {
-          onAddNotification(
-            "Download Successful",
-            `Saved ${completedTask.title} (${completedTask.totalMB}MB) to device storage.`,
-            "success"
-          );
-        }
-
-        return changed ? nextTasks : prevTasks;
-      });
-    }, 400);
-
-    return () => clearInterval(activeIntervals);
-  }, [setTasks, onAddNotification]);
-
-  const handlePause = (id: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, status: "paused", speedMBs: 0 } : t))
-    );
-    onAddNotification("Download Paused", "Daemon worker put on hold.", "warning");
-  };
-
-  const handleResume = (id: string) => {
-    const task = tasks.find(t => t.id === id);
-    if (task && (task as any).isRealStream) {
-      // Re-run browser stream handler
-      onAddNotification("Download Resumed", "Resuming connection feed...", "info");
-      const downloadUrl = (task as any).downloadUrl || task.url;
-      runFileStreamDownload(id, downloadUrl, task.title, task.totalMB);
+        onAddNotification("Export complete", "Transcript shared accurately.", "success");
+      } catch (e) {
+        // Ignored
+      }
     } else {
-      setTasks((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, status: "downloading" } : t))
-      );
-      onAddNotification("Download Resumed", "Simulated sync running.", "info");
+      navigator.clipboard.writeText(content);
+      onAddNotification("Copied link", "Share transcript copied directly.", "success");
     }
   };
 
-  const handleRetry = (id: string) => {
-    const task = tasks.find(t => t.id === id);
-    if (task && (task as any).isRealStream) {
-      const downloadUrl = (task as any).downloadUrl || task.url;
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === id
-            ? { ...t, status: "downloading", progress: 0, downloadedMB: 0, speedMBs: 0 }
-            : t
-        )
-      );
-      onAddNotification("Retrying Stream", "Re-querying streaming endpoint...", "info");
-      runFileStreamDownload(id, downloadUrl, task.title, task.totalMB);
-    } else {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === id
-            ? { ...t, status: "downloading", progress: 0, downloadedMB: 0, speedMBs: 0 }
-            : t
-        )
-      );
-      onAddNotification("Retrying Download", "Attempting connection thread query...", "info");
-    }
-  };
-
-  const handleClearAll = () => {
-    setTasks([]);
+  const handleReset = () => {
+    setSelectedFile(null);
+    setFileDetails(null);
+    setStatus("idle");
+    setProgress(0);
+    setPlainTranscript("");
+    setSrtSubtitles("");
+    setErrorMsg(null);
   };
 
   return (
-    <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="downloader-studio">
-      <div className="p-4 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-500">
-              <Download className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold tracking-wide text-slate-100">Downloader Studio</h2>
-              <p className="text-[10px] text-slate-400">Android Foreground Multi-queue Daemon</p>
-            </div>
+    <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 select-none text-left space-y-5" id="offline-transcription-studio">
+      
+      {/* Header and Branding (Material 3 Card) */}
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-950/45 to-slate-950 p-5 rounded-3xl border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+        <div className="flex items-center gap-2">
+          <div className="p-2 bg-indigo-500/15 text-indigo-400 rounded-2xl border border-indigo-500/20">
+            <Mic className="w-5 h-5 text-indigo-400 animate-pulse" />
           </div>
-          {tasks.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 py-1 px-2.5 rounded-full transition-all duration-200"
-            >
-              Clear All Tasks
-            </button>
-          )}
+          <div>
+            <h1 className="text-base font-bold text-white tracking-wide">
+              Voice to Text (Gemini Edition)
+            </h1>
+            <p className="text-[10px] text-slate-300 mt-0.5">
+              Secure Direct Processing • Sub Rip Caption Aligner & Transcription Panel
+            </p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-1.5 bg-indigo-500/10 text-indigo-400 text-[10px] uppercase font-mono py-1 px-3.5 rounded-full border border-indigo-500/20">
+          <ShieldCheck className="w-3.5 h-3.5" />
+          <span>Lossless PCM Resampling</span>
         </div>
       </div>
 
-      <div className="p-4 bg-[#111827]/45 border-b border-[#1E293B] shrink-0">
-        <form onSubmit={handleFetchMetadata} className="relative">
-          <input
-            type="text"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            onFocus={() => setIsUrlFocused(true)}
-            onBlur={() => setIsUrlFocused(false)}
-            placeholder="Paste video / audio Link here..."
-            className={`w-full bg-[#1A2333] border text-xs text-slate-100 rounded-2xl py-3.5 pl-4 pr-12 focus:outline-none transition-all duration-300 placeholder-slate-500 ${
-              isUrlFocused ? "border-blue-500 ring-2 ring-blue-500/10 bg-[#1e293b]" : "border-[#1E293B]"
-            }`}
-          />
-          <button
-            type="submit"
-            disabled={!url.trim() || isFetching}
-            className="absolute right-2 top-2 p-2 bg-blue-500 hover:bg-blue-600 disabled:bg-slate-800 disabled:text-slate-600 text-white rounded-xl transition-all duration-200"
-            title="Fetch URL Details"
-          >
-            {isFetching ? (
-              <div className="w-3.5 h-3.5 border-2 border-white/35 border-t-white rounded-full animate-spin" />
-            ) : (
-              <Globe className="w-3.5 h-3.5" />
-            )}
-          </button>
-        </form>
-        <p className="text-[9px] text-slate-400 mt-2 text-center">
-          Pasting any movie or clip URL automatically performs full format mapping and metadata fetch.
-        </p>
-      </div>
-
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#070B13]">
-        {/* Loading Spinner during API lookup */}
-        {isFetching && (
-          <div className="bg-[#1A2333]/45 border border-[#1E293B] rounded-2xl p-6 text-center flex flex-col items-center justify-center space-y-3">
-            <div className="w-8 h-8 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-            <p className="text-xs text-slate-350 font-medium">Interfacing with API endpoint stream...</p>
-            <p className="text-[9px] text-slate-500">Querying: {url.substring(0, 48)}...</p>
-          </div>
-        )}
-
-        {/* Error Dialog Banner */}
-        {errorMsg && !fetchedMetadata && (
-          <div className="bg-rose-500/10 border border-rose-500/25 rounded-xl p-3 text-xs text-rose-300 flex items-start gap-2.5">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
-            <div>
-              <p className="font-semibold">Vercel Backend Service Unreachable</p>
-              <p className="text-[10px] text-slate-400 mt-1">
-                {errorMsg}. Loading smart emulator workspace simulation mode to generate full preview mocks.
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* 2. Beautiful Live Video Preview Context Panel */}
-        {fetchedMetadata && (
-          <div className="bg-[#1A2333]/70 border border-blue-500/20 rounded-2xl p-4 space-y-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] bg-blue-500/10 text-blue-400 font-mono py-0.5 px-2 rounded-full font-bold uppercase tracking-wider">
-                Media Identified
-              </span>
-              <button 
-                onClick={() => {
-                  setFetchedMetadata(null);
-                  setErrorMsg(null);
-                }}
-                className="text-[10px] text-slate-400 hover:text-slate-200 transition-colors"
-              >
-                Clear Stream
-              </button>
-            </div>
-
-            {/* Live responsive video player or picture placeholder */}
-            <div className="bg-black aspect-video rounded-xl overflow-hidden border border-slate-800/80 relative flex items-center justify-center">
-              {fetchedMetadata.preview_url && (
-                fetchedMetadata.preview_url.endsWith(".mp4") || 
-                fetchedMetadata.preview_url.endsWith(".webm") || 
-                fetchedMetadata.preview_url.includes("video") ? (
-                  <video 
-                    src={fetchedMetadata.preview_url} 
-                    controls 
-                    playsInline 
-                    loop 
-                    muted 
-                    autoPlay
-                    className="w-full h-full object-cover" 
-                  />
-                ) : (
-                  <div className="w-full h-full relative">
-                    <img 
-                      src={fetchedMetadata.preview_url} 
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover" 
-                      alt="Source Preview Thumbnail" 
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop";
-                      }}
-                    />
-                    {/* Visual Overlay of Play for aesthetic parity */}
-                    <div className="absolute inset-0 bg-black/35 flex items-center justify-center">
-                      <div className="w-12 h-12 rounded-full bg-blue-500/90 text-white flex items-center justify-center shadow-lg border border-white/10 hover:scale-105 transition-all duration-300">
-                        <Play className="w-5 h-5 ml-1 text-white fill-white" />
-                      </div>
-                    </div>
-                  </div>
-                )
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <h4 className="text-xs font-semibold text-slate-200 leading-snug line-clamp-2">
-                {fetchedMetadata.title}
-              </h4>
-              <p className="text-[10px] text-slate-400 truncate">
-                Target URL: <span className="text-blue-400 font-mono text-[9px]">{url}</span>
-              </p>
-            </div>
-
-            {/* 3. Formats & Resolutions mapping selection */}
-            <div className="space-y-1.5">
-              <label className="text-[9px] uppercase tracking-wider text-slate-400 font-bold font-mono block">
-                Select Quality Resolution Format
-              </label>
-              <div className="grid grid-cols-1 gap-2">
-                {fetchedMetadata.formats.map((format, idx) => (
-                  <button
-                    key={idx}
-                    type="button"
-                    onClick={() => setSelectedFormatIndex(idx)}
-                    className={`flex items-center justify-between text-xs py-2.5 px-3 rounded-xl border text-left transition-all duration-200 ${
-                      selectedFormatIndex === idx 
-                        ? "bg-blue-500/10 border-blue-500/50 text-blue-300 font-semibold"
-                        : "bg-slate-900/60 border-[#1E293B] hover:border-slate-700 text-slate-350"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2">
-                      <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${
-                        selectedFormatIndex === idx ? "border-blue-500" : "border-slate-600"
-                      }`}>
-                        {selectedFormatIndex === idx && <div className="w-1.5 h-1.5 bg-blue-500 rounded-full" />}
-                      </div>
-                      <span>{format.quality}</span>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-400 bg-[#0D1321] px-2 py-0.5 rounded border border-slate-800">
-                      {format.size}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 4. Native continuous download thread link download */}
-            <button
-              onClick={handleStartDownload}
-              className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all duration-300 flex items-center justify-center gap-2 border border-blue-400/10"
-            >
-              <Download className="w-4 h-4 text-white" />
-              <span>Start Downloading In Background</span>
-            </button>
-          </div>
-        )}
-
-        {/* Existing Active Foreground Thread Queues */}
-        {tasks.length > 0 && (
-          <div className="pt-2 border-t border-slate-900">
-            <h3 className="text-[10px] font-bold text-slate-400 tracking-wider uppercase mb-2">
-              ACTIVE DAEMON WORKER QUEUES
-            </h3>
-            
-            <div className="space-y-3">
-              {tasks.map((task) => (
-                <div
-                  key={task.id}
-                  className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 relative overflow-hidden transition-all duration-300 hover:border-slate-700"
-                >
-                  <div className="flex items-start justify-between gap-2 mb-2">
-                    <div className="flex-1 min-w-0">
-                      <h4 className="text-[11px] font-medium text-slate-200 truncate">{task.title}</h4>
-                      <p className="text-[9px] text-slate-500 truncate mt-0.5">{task.url}</p>
-                    </div>
-                    {task.status === "completed" && (
-                      <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
-                    )}
-                    {task.status === "failed" && (
-                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
-                    )}
-                    {task.status === "downloading" && (
-                      <span className="text-[9px] bg-blue-500/10 text-blue-400 py-0.5 px-2 rounded-full font-mono font-medium animate-pulse">
-                        {task.speedMBs} MB/s
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Progress and status bars */}
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[9px] font-mono text-slate-400">
-                      <span>
-                        {task.downloadedMB}MB / {task.totalMB}MB
-                      </span>
-                      <span>{task.progress}%</span>
-                    </div>
-
-                    <div className="w-full bg-[#0D1321] rounded-full h-1.5 overflow-hidden">
-                      <div
-                        className={`h-full transition-all duration-300 ${
-                          task.status === "completed"
-                            ? "bg-emerald-500"
-                            : task.status === "paused"
-                            ? "bg-amber-500"
-                            : task.status === "failed"
-                            ? "bg-rose-500"
-                            : "bg-blue-500"
-                        }`}
-                        style={{ width: `${task.progress}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Native action triggers */}
-                  <div className="flex items-center justify-between mt-3 pt-2.5 border-t border-slate-800/60">
-                    <span className="text-[9px] text-slate-400 flex items-center gap-1">
-                      <FileText className="w-2.5 h-2.5 text-blue-500" />
-                      {task.status.toUpperCase()}
-                    </span>
-
-                    <div className="flex items-center gap-2">
-                      {task.status === "downloading" && (
-                        <button
-                          onClick={() => handlePause(task.id)}
-                          className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 transition-colors"
-                          title="Pause Download"
-                        >
-                          <Pause className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {task.status === "paused" && (
-                        <button
-                          onClick={() => handleResume(task.id)}
-                          className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 transition-colors"
-                          title="Resume Download"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {(task.status === "failed" || task.status === "completed") && (
-                        <button
-                          onClick={() => handleRetry(task.id)}
-                          className="p-1 rounded-lg hover:bg-slate-800 text-slate-300 transition-colors"
-                          title="Download Again"
-                        >
-                          <RotateCw className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                      {task.status === "completed" && (
-                        <span className="text-[8px] text-emerald-400 font-mono">
-                          Saved {task.completedAt}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Empty status check */}
-        {tasks.length === 0 && !fetchedMetadata && !isFetching && (
-          <div className="flex flex-col items-center justify-center h-full py-10 text-center">
-            <div className="w-12 h-12 rounded-full border border-dashed border-slate-700 flex items-center justify-center text-slate-500 mb-3">
-              <Download className="w-5 h-5" />
-            </div>
-            <h3 className="text-xs font-medium text-slate-300">Ready for Download Queue</h3>
-            <p className="text-[10px] text-slate-500 max-w-[200px] mt-1">
-              Supports MP4, M3U8 streams, and online audio URLs. Output is formatted for video editors.
+      {/* Required Banner Warning */}
+      {!apiKeySet && (
+        <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl text-xs text-rose-350 flex items-start gap-3 animate-fade-in">
+          <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-extrabold text-rose-400">Gemini API Key Required</p>
+            <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+              This app transcudes and performs audio processing locally on your device before translating and sending standard audio frames to Google's Gemini models for speech-to-text. Please provide your credential below.
             </p>
           </div>
-        )}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        
+        {/* Left Settings & Upload Deck (Grid Column 5) */}
+        <div className="lg:col-span-5 space-y-4">
+          
+          {/* Dedicated Gemini API key Settings Panel (Embedded securely inside active screen context) */}
+          <div className="bg-[#0e1626] border border-slate-800 p-4 rounded-3xl space-y-3 shadow-md">
+            <span className="text-[10px] font-extrabold text-indigo-400 uppercase tracking-widest flex items-center gap-1.5">
+              <Key className="w-4 h-4 text-indigo-400" />
+              <span>Gemini Credentials Console</span>
+            </span>
+
+            <p className="text-[9px] text-slate-400 leading-relaxed font-sans pb-1">
+              "Your Gemini API Key is stored locally inside this app on your device only. The app does not upload, store, collect, or save your API key on any external server. Your key is used only to communicate directly with Google's Gemini API."
+            </p>
+
+            <div className="space-y-2">
+              <div className="bg-slate-950 p-1.5 rounded-2xl border border-slate-800 flex items-center justify-between gap-1.5 home-settings-key-group">
+                <input
+                  type={showKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="Paste AI Studio API Key..."
+                  className="bg-transparent text-xs text-slate-100 flex-1 px-2.5 outline-none font-mono placeholder-slate-600 focus:ring-0 select-text"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey(!showKey)}
+                  className="p-1.5 hover:bg-slate-905 text-slate-400 hover:text-white rounded-lg transition-colors"
+                >
+                  {showKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+
+              {/* Secure status display lines */}
+              <div className="flex items-center justify-between text-[9px] font-mono text-slate-500">
+                <span>Secure Storage Status:</span>
+                {apiKeySet ? (
+                  <span className="text-emerald-400 font-bold flex items-center gap-1">
+                    <ShieldCheck className="w-3 h-3 text-emerald-400" /> Stored locally
+                  </span>
+                ) : (
+                  <span className="text-amber-500 font-bold">Not configured</span>
+                )}
+              </div>
+
+              {/* Buttons deck */}
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveApiKey}
+                  className="bg-indigo-650 hover:bg-indigo-600 text-white text-[10px] font-bold py-2 rounded-xl transition-colors text-center border border-indigo-500/20 active:scale-95 duration-150"
+                >
+                  {apiKeySet ? "Update Key" : "Save Key"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleValidateApiKey}
+                  disabled={keyValidationStatus === "validating" || !apiKey}
+                  className={`border text-[10px] py-1.5 rounded-xl transition-all font-bold flex items-center justify-center gap-1 ${
+                    keyValidationStatus === "valid"
+                      ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
+                      : "bg-[#0D1321] border-slate-800 text-slate-300 hover:border-slate-700"
+                  }`}
+                >
+                  {keyValidationStatus === "validating" ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                  <span>Check Credentials</span>
+                </button>
+              </div>
+
+              {apiKeySet && (
+                <button
+                  type="button"
+                  onClick={handleClearApiKey}
+                  className="w-full text-center text-[9px] text-rose-450 hover:text-rose-400 py-1 font-mono uppercase tracking-wider font-extrabold"
+                >
+                  Clear Configured Keys
+                </button>
+              )}
+
+              {validationError && (
+                <div className="bg-rose-500/10 border border-rose-500/20 p-2 text-[9px] text-rose-300 rounded-xl leading-relaxed select-text font-mono break-all font-semibold">
+                  Error: {validationError}
+                </div>
+              )}
+
+            </div>
+          </div>
+
+          {/* SAF File Picker layout */}
+          <div 
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => status !== "extracting_audio" && status !== "transcribing" && fileInputRef.current?.click()}
+            className={`cursor-pointer border-2 border-dashed rounded-3xl p-6 text-center transition-all duration-300 flex flex-col items-center justify-center relative min-h-[175px] ${
+              isDragging
+                ? "bg-indigo-950/20 border-indigo-400 shadow-inner scale-[0.99]"
+                : selectedFile 
+                ? "bg-slate-900/60 border-indigo-500/30 shadow-inner" 
+                : "bg-slate-950/70 border-slate-800/80 hover:border-indigo-500/40 hover:bg-[#111A2E]/30"
+            }`}
+          >
+            <input 
+              type="file" 
+              ref={fileInputRef}
+              onChange={handleFileInputChange}
+              accept=".mp3,.wav,.m4a,.aac,.mp4,.mov,.mkv,.webm"
+              className="hidden"
+              disabled={status === "extracting_audio" || status === "transcribing"}
+            />
+
+            {!selectedFile ? (
+              <div className="space-y-3 py-1">
+                <div className="w-12 h-12 rounded-2xl bg-indigo-500/5 text-indigo-400 flex items-center justify-center border border-indigo-400/15 mx-auto">
+                  <FileAudio className="w-6 h-6 text-indigo-400" />
+                </div>
+                <div>
+                  <h3 className="text-xs font-bold text-slate-200">Import Media Document</h3>
+                  <p className="text-[9px] text-slate-400 mt-1 max-w-[240px] leading-relaxed mx-auto">
+                    Select Audio File (MP3/WAV/M4A/AAC) or Video File (MP4/MOV/MKV/WEBM)
+                  </p>
+                </div>
+                <button 
+                  type="button"
+                  className="bg-indigo-650 hover:bg-indigo-600 text-white text-[9px] font-extrabold py-1.5 px-3.5 rounded-xl transition-all duration-150 active:scale-95 text-center mt-1 block mx-auto"
+                >
+                  Retrieve local document
+                </button>
+              </div>
+            ) : (
+              <div className="w-full text-left space-y-3">
+                <div className="flex justify-between items-start select-text">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="p-2.5 bg-indigo-500/10 text-indigo-400 rounded-xl border border-indigo-500/20 shrink-0">
+                      {fileDetails?.type === "video" ? <FileVideo className="w-5 h-5 text-indigo-400 animate-pulse" /> : <FileAudio className="w-5 h-5 text-indigo-400" />}
+                    </div>
+                    <div className="min-w-0">
+                      <h4 className="text-xs font-bold text-slate-200 truncate pr-1">{fileDetails?.name}</h4>
+                      <p className="text-[9px] text-slate-400 mt-0.5">{fileDetails?.size} • Span: {fileDetails?.durationStr}</p>
+                    </div>
+                  </div>
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleReset();
+                    }}
+                    className="text-[9px] text-slate-400 hover:text-white bg-slate-900 border border-slate-800 hover:bg-slate-800 px-2.5 py-1 rounded-lg shrink-0 select-none font-bold"
+                  >
+                    Clear Filter
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Action Trigger Buttons */}
+          <div className="space-y-2 select-none">
+            <button
+              onClick={() => triggerTranscription("txt")}
+              disabled={status === "extracting_audio" || status === "transcribing" || !selectedFile || !apiKeySet}
+              className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all shadow-md ${
+                status === "extracting_audio" || status === "transcribing" || !selectedFile || !apiKeySet
+                  ? "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+                  : "bg-indigo-650 hover:bg-indigo-600 text-white border border-indigo-555 duration-150 active:scale-95 cursor-pointer"
+              }`}
+            >
+              <Sparkles className="w-4 h-4 text-indigo-200" />
+              <span>Generate Plain Transcript</span>
+            </button>
+
+            <button
+              onClick={() => triggerTranscription("srt")}
+              disabled={status === "extracting_audio" || status === "transcribing" || !selectedFile || !apiKeySet}
+              className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all shadow-md ${
+                status === "extracting_audio" || status === "transcribing" || !selectedFile || !apiKeySet
+                  ? "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+                  : "bg-emerald-650 hover:bg-emerald-600 text-white border border-emerald-600 duration-150 active:scale-95 cursor-pointer"
+              }`}
+            >
+              <FileAudio className="w-4 h-4 text-emerald-250 animate-pulse" />
+              <span>Generate SRT Subtitles</span>
+            </button>
+          </div>
+
+        </div>
+
+        {/* Right Processing Dashboard & Subtitle Screen Area */}
+        <div className="lg:col-span-7 space-y-4 text-slate-200">
+          
+          {/* Audio processing / compiling loader overlay */}
+          {status !== "idle" && (
+            <div className="bg-slate-900/60 p-5 border border-slate-800 rounded-3xl space-y-3.5 relative overflow-hidden select-text text-slate-200 shadow-md">
+              <div className="flex justify-between items-center select-none">
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest font-extrabold flex items-center gap-1">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-400 animate-spin" />
+                  <span>Interactive Pipeline Metrics</span>
+                </span>
+                {(status === "extracting_audio" || status === "transcribing") && (
+                  <span className="text-[9px] text-indigo-400 font-mono font-extrabold flex items-center gap-1 shrink-0">
+                    <Loader2 className="w-2.5 h-2.5 animate-spin text-indigo-400" />
+                    <span>Synchronizing frames...</span>
+                  </span>
+                )}
+              </div>
+
+              {/* Step indicator description lines */}
+              <div className="flex items-center gap-2 text-xs font-semibold leading-relaxed">
+                {status === "extracting_audio" && (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-amber-500 shrink-0" />
+                    <span className="text-amber-200">[Step 1/3]: Decoding array buffers and downsampling PCM matrix...</span>
+                  </>
+                )}
+                {status === "transcribing" && (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
+                    <span className="text-indigo-200">[Step 2/3]: Uploading audio stream securely to Gemini API model...</span>
+                  </>
+                )}
+                {status === "completed" && (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    <span className="text-emerald-400 font-bold">[Step 3/3]: Transcription completed perfectly. Output mapped.</span>
+                  </>
+                )}
+                {status === "error" && (
+                  <>
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span className="text-rose-450 font-bold">Local Pipeline Aborted</span>
+                  </>
+                )}
+              </div>
+
+              {/* Progress dynamic bars */}
+              <div className="space-y-1 select-none">
+                <div className="flex justify-between text-[9px] text-slate-400 font-mono">
+                  <span>Compilation Engine Status</span>
+                  <span className="font-bold text-slate-200">{progress}%</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-950 rounded-full overflow-hidden border border-slate-900">
+                  <div 
+                    className={`h-full transition-all duration-300 ${
+                      status === "error" ? "bg-rose-500" : "bg-gradient-to-r from-indigo-500 to-emerald-500"
+                    }`}
+                    style={{ width: `${progress}%` }}
+                  />
+                </div>
+              </div>
+
+              {/* Error messages log panel */}
+              {errorMsg && (
+                <div className="bg-rose-500/10 border border-rose-505/20 rounded-2xl p-3.5 text-xs text-rose-300 space-y-1 select-text">
+                  <p className="font-extrabold flex items-center gap-1.5 text-rose-450 select-none">
+                    <AlertCircle className="w-4 h-4 text-rose-500" />
+                    <span>Fatal Converter Handshake Interrupted</span>
+                  </p>
+                  <p className="text-[10px] text-slate-400 tracking-wide font-mono leading-relaxed p-2 bg-black/45 rounded border border-rose-950/40 select-text break-all">
+                    {errorMsg}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Results Output Canvas panel (Shows only if content is compiled) */}
+          {(plainTranscript || srtSubtitles) ? (
+            <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-3xl space-y-4">
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 pb-3 border-b border-slate-800/60 select-none animate-fade-in">
+                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block">
+                  Compiled Transcription Stream
+                </span>
+                
+                {/* Tabs switcher */}
+                <div className="flex bg-slate-950 p-0.5 rounded-xl border border-slate-800">
+                  <button
+                    onClick={() => setActiveTab("transcript")}
+                    className={`text-[9.5px] px-3.5 py-1.5 rounded-lg font-bold transition-all ${
+                      activeTab === "transcript" 
+                        ? "bg-indigo-650 text-white shadow-md font-extrabold" 
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    Plain text
+                  </button>
+                  <button
+                    onClick={() => setActiveTab("srt")}
+                    className={`text-[9.5px] px-3.5 py-1.5 rounded-lg font-bold transition-all ${
+                      activeTab === "srt" 
+                        ? "bg-indigo-650 text-white shadow-md font-extrabold" 
+                        : "text-slate-400 hover:text-slate-200"
+                    }`}
+                  >
+                    SRT format
+                  </button>
+                </div>
+              </div>
+
+              {/* Dynamic scroll content area */}
+              <div className="bg-slate-950 p-4 rounded-2xl border border-slate-800/80 max-h-60 overflow-y-auto text-left leading-relaxed shadow-inner">
+                {activeTab === "transcript" ? (
+                  <div className="text-slate-105 text-[11px] whitespace-pre-wrap font-sans select-all leading-relaxed">
+                    {plainTranscript || "Extracting spoken track words..."}
+                  </div>
+                ) : (
+                  <div className="text-slate-300 font-mono text-[10px] whitespace-pre-wrap select-all leading-normal select-text">
+                    {srtSubtitles || "Constructing caption timelines..."}
+                  </div>
+                )}
+              </div>
+
+              {/* Trigger tools buttons deck */}
+              <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800/60 select-none">
+                <button
+                  onClick={handleCopyResult}
+                  className="flex items-center gap-1 bg-slate-850 hover:bg-slate-800 text-slate-200 text-[10px] font-bold py-1.5 px-3.5 rounded-xl transition border border-slate-800 hover:text-white"
+                >
+                  {copied ? (
+                    <>
+                      <Check className="w-3.5 h-3.5 text-emerald-400 animate-bounce" />
+                      <span>Copied!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>Copy Result</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => handleDownloadBlob("txt")}
+                  className="flex items-center gap-1 bg-slate-850 hover:bg-slate-800 text-slate-200 text-[10px] font-bold py-1.5 px-3.5 rounded-xl transition border border-slate-800 hover:text-white"
+                >
+                  <Download className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Download TXT</span>
+                </button>
+
+                <button
+                  onClick={() => handleDownloadBlob("srt")}
+                  className="flex items-center gap-1 bg-indigo-650 hover:bg-indigo-600 text-white text-[10px] font-extrabold py-1.5 px-3.5 rounded-xl transition duration-150 active:scale-95"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download SRT</span>
+                </button>
+
+                <button
+                  onClick={handleShareResult}
+                  className="flex items-center gap-1 bg-slate-850 hover:bg-slate-800 text-slate-200 text-[10px] font-bold py-1.5 px-3.5 rounded-xl transition border border-slate-800"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-slate-400" />
+                  <span>Share</span>
+                </button>
+              </div>
+
+            </div>
+          ) : (
+            <div className="bg-slate-900/40 border border-slate-800/60 p-8 rounded-3xl text-center flex flex-col items-center justify-center space-y-4 min-h-[220px] select-none text-slate-400">
+              <div className="p-3.5 bg-slate-950 rounded-2xl border border-slate-800 text-slate-500 shadow-md">
+                <Mic className="w-6 h-6" />
+              </div>
+              <div className="space-y-1.5 max-w-sm">
+                <h4 className="text-xs font-bold text-slate-350">Speech Output Hub</h4>
+                <p className="text-[10px] leading-relaxed text-slate-500">
+                  Import an audio track or movie recap, validate key configurations, and activate the transcriber to start decoding voice.
+                </p>
+              </div>
+            </div>
+          )}
+
+        </div>
+
       </div>
+
     </div>
   );
 }

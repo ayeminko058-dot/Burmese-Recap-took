@@ -23,6 +23,7 @@ export interface DownloadTask {
   errorMsg?: string;
   category: "video" | "audio" | "recap";
   completedAt?: string;
+  downloadUrl?: string;
 }
 
 export interface VoiceOption {

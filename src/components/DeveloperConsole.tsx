@@ -182,8 +182,8 @@ export default function DeveloperConsole({ onAddNotification }: DeveloperConsole
               To pass Google Play Console Production Reviews instantly without privacy queries, we configured precise manifest settings and dynamic checking.
             </p>
             <ul className="space-y-2 text-xs text-slate-350 list-disc list-inside">
-              <li><b>usesCleartextTraffic="true"</b>: Essential for Edge TTS stream fetching which uses secure micro-services.</li>
-              <li><b>FOREGROUND_SERVICE and type 'dataSync'</b>: Required for continuing downloads and stitching TTS bytes in the background when the phone is locked.</li>
+              <li><b>usesCleartextTraffic="true"</b>: Essential for Text to Voice stream fetching which uses secure micro-services.</li>
+              <li><b>FOREGROUND_SERVICE and type 'dataSync'</b>: Required for continuing downloads and stitching Text to Voice bytes in the background when the phone is locked.</li>
               <li><b>Granular Permissions</b>: {"For api >= 33, standard storage request crashes and generates rejections. The source code requests media collections cleanly."}</li>
             </ul>
           </div>
@@ -205,7 +205,7 @@ export default function DeveloperConsole({ onAddNotification }: DeveloperConsole
                 Foreground Buffer Stitching
               </h3>
               <p className="text-[11px] text-slate-450">
-                To bypass edge-tts Vercel constraints for scripts over 1,000 characters, our system acts as a pipeline sequencer. It splits text block arrays, queries consecutive binary stream chunks, aggregates them into indexed raw byte lists {"(List<int>)"}, and compiles them natively into a single file path.
+                To bypass Text to Voice constraints for scripts over 1,000 characters, our system acts as a pipeline sequencer. It splits text block arrays, queries consecutive binary stream chunks, aggregates them into indexed raw byte lists {"(List<int>)"}, and compiles them natively into a single file path.
               </p>
             </div>
           </div>

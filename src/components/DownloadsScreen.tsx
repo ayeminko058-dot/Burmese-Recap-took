@@ -9,6 +9,8 @@ interface SavedFile {
   size: string;
   data: string;
   audioUrl?: string;
+  url?: string;
+  videoUrl?: string;
 }
 
 interface DownloadsScreenProps {
@@ -20,6 +22,20 @@ interface DownloadsScreenProps {
 export default function DownloadsScreen({ files, onDeleteFile, onAddNotification }: DownloadsScreenProps) {
   
   const handleDownloadAgain = (file: SavedFile) => {
+    if (file.type === "video" || file.url || file.videoUrl) {
+      const videoHref = file.url || file.videoUrl || file.audioUrl || file.data;
+      if (videoHref && videoHref.startsWith("http")) {
+        const link = document.createElement("a");
+        link.href = videoHref;
+        link.download = file.name;
+        link.target = "_blank";
+        link.rel = "noopener noreferrer";
+        link.click();
+        onAddNotification("Download Started", `${file.name} download initiated.`, "success");
+        return;
+      }
+    }
+
     if (file.type === "audio" && file.audioUrl) {
       const link = document.createElement("a");
       link.href = file.audioUrl;
@@ -58,7 +74,7 @@ export default function DownloadsScreen({ files, onDeleteFile, onAddNotification
             <FolderOpen className="w-12 h-12 text-slate-600 mb-3 stroke-[1.5]" />
             <h3 className="text-xs font-semibold text-slate-300">File Vault Empty</h3>
             <p className="text-[10px] text-slate-500 max-w-[200px] mt-1 text-center">
-              Compiled narration.srt files and Edge TTS MP3 waveforms will appear in this directory.
+              Compiled narration.srt files and Text to Voice MP3 waveforms will appear in this directory.
             </p>
           </div>
         ) : (

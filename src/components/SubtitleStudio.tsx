@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { 
   FileText, Plus, Trash2, Copy, Download, Play, Pause, RotateCcw, Upload, HelpCircle, Sparkles, Check, Info, Layout
 } from "lucide-react";
+import { Filesystem, Directory } from "@capacitor/filesystem";
+import { triggerRewardAd } from "../utils/admob";
 import { SubtitleBlock } from "../types";
 
 // ==========================================
@@ -290,6 +292,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
     "ယခုတစ်ခေါက် တင်ဆက်ပေးမယ့် လူသတ်ကွင်း ဇာတ်လမ်းဟာ အင်္ဂလန်နိုင်ငံ အလယ်ပိုင်းဒေသမှာ အမှန်တကယ် ဖြစ်ပွားခဲ့တဲ့ ဖြစ်ရပ်ဆန်း တစ်ခုပဲ ဖြစ်ပါတယ်။ မြန်မာနိုင်ငံ၏ သတင်းနည်းပညာကဏ္ဍ အလွန်လျင်မြန်စွာတိုးတက်လာပုံပဲဖြစ်ပါတယ်။"
   );
   const [blocks, setBlocks] = useState<any[]>(preloadedSubtitles);
+  const [isDownloadingSrt, setIsDownloadingSrt] = useState(false);
   
   // Customizer styling states
   const [accentClass, setAccentClass] = useState("text-yellow-400");
@@ -562,32 +565,86 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
 
   const handleDownloadSrtText = () => {
     if (blocks.length === 0) return;
-    const srtStr = generateSrtPayload();
-    const cleanFileName = `Burmese_${mediaFileName.split(".")[0] || "Track"}.srt`;
 
-    // Local download browser trigger
-    const blob = new Blob([srtStr], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = cleanFileName;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    triggerRewardAd(
+      "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာတန်းထိုး SRT ကို ရယူပါ",
+      async () => {
+        setIsDownloadingSrt(true);
+        const srtStr = generateSrtPayload();
+        // Maintain consistent naming format
+        const cleanFileName = `Burmese_${mediaFileName.split(".")[0] || "Track"}_${Date.now()}.srt`;
 
-    onAddDownloadedFile(cleanFileName, srtStr, "srt");
-    onAddNotification("SRT Saved Successfully", `${cleanFileName} downloaded.`, "success");
+        try {
+          // Convert string to base64 encoding safely supporting Burmese Unicode characters
+          const utf8Bytes = new TextEncoder().encode(srtStr);
+          let binary = "";
+          const len = utf8Bytes.byteLength;
+          for (let i = 0; i < len; i++) {
+            binary += String.fromCharCode(utf8Bytes[i]);
+          }
+          const base64Data = btoa(binary);
+
+          // Write natively to Download directory folder using Capacitor Filesystem
+          await Filesystem.writeFile({
+            path: `Download/${cleanFileName}`,
+            data: base64Data,
+            directory: Directory.ExternalStorage,
+            recursive: true,
+          });
+
+          setIsDownloadingSrt(false);
+          alert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+          
+          if (onAddDownloadedFile) {
+            onAddDownloadedFile(cleanFileName, srtStr, "srt");
+          }
+          onAddNotification("SRT Saved Successfully", `${cleanFileName} written to Download folder.`, "success");
+        } catch (err) {
+          console.warn("[File System Fallback] Native directories unavailable, writing via browser anchor:", err);
+          try {
+            const blob = new Blob([srtStr], { type: "text/plain;charset=utf-8" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = cleanFileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            setIsDownloadingSrt(false);
+            alert("🎉 SRT စာတန်းထိုးဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။");
+            
+            if (onAddDownloadedFile) {
+              onAddDownloadedFile(cleanFileName, srtStr, "srt");
+            }
+            onAddNotification("SRT Saved Successfully", `${cleanFileName} exported.`, "success");
+          } catch (browserErr) {
+            console.error("SRT final download loop error:", browserErr);
+            setIsDownloadingSrt(false);
+            alert("ဒေါင်းလုဒ်ဆွဲရာတွင် အမှားအယွင်းရှိနေပါသည်။ ပြန်လည်ကြိုးစားပါ။");
+          }
+        }
+      },
+      onAddNotification
+    );
   };
 
   const handleCopySrtText = () => {
     if (blocks.length === 0) return;
-    const srtStr = generateSrtPayload();
-    navigator.clipboard.writeText(srtStr).then(() => {
-      setJustCopied(true);
-      onAddNotification("Copied to Clipboard", "SubRip plain-text segment buffered.", "success");
-      setTimeout(() => setJustCopied(false), 2000);
-    });
+
+    triggerRewardAd(
+      "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာတန်းထိုး SRT ကို ရယူပါ",
+      () => {
+        const srtStr = generateSrtPayload();
+        navigator.clipboard.writeText(srtStr).then(() => {
+          setJustCopied(true);
+          onAddNotification("Copied to Clipboard", "SubRip plain-text segment buffered.", "success");
+          setTimeout(() => setJustCopied(false), 2000);
+        });
+      },
+      onAddNotification
+    );
   };
 
   // Clock format tool
@@ -855,11 +912,20 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                 <button
                   type="button"
                   onClick={handleDownloadSrtText}
-                  disabled={blocks.length === 0}
+                  disabled={blocks.length === 0 || isDownloadingSrt}
                   className="py-2 px-3.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Download SRT</span>
+                  {isDownloadingSrt ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                      <span>Downloading... (ဒေါင်းလုဒ်ဆွဲနေသည်...)</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download SRT</span>
+                    </>
+                  )}
                 </button>
                 <button
                   type="button"

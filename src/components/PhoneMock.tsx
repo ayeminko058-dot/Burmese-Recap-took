@@ -1,13 +1,16 @@
 import React, { useState, useEffect } from "react";
 import { 
   Home, Download, Settings, Wifi, Battery, Shield, ShieldAlert, Cpu, 
-  FolderOpen, Smartphone, Sparkles, Volume2, ArrowLeft, RefreshCw, X, Bell 
+  FolderOpen, Smartphone, Sparkles, Volume2, ArrowLeft, RefreshCw, X, Bell,
+  Mic, FileAudio, FileVideo 
 } from "lucide-react";
+import { AdMob, BannerAdSize, BannerAdPosition } from "@capacitor-community/admob";
 import VideoDownloader from "./VideoDownloader";
 import SubtitleStudio from "./SubtitleStudio";
 import TtsStudio from "./TtsStudio";
 import DownloadsScreen from "./DownloadsScreen";
 import SettingsScreen from "./SettingsScreen";
+import Translator from "./Translator";
 import { DownloadTask, AppNotification } from "../types";
 
 interface SavedFile {
@@ -18,6 +21,8 @@ interface SavedFile {
   size: string;
   data: string;
   audioUrl?: string;
+  url?: string;
+  videoUrl?: string;
 }
 
 interface PhoneMockProps {
@@ -39,9 +44,9 @@ export default function PhoneMock({
   downloadedFiles,
   setDownloadedFiles
 }: PhoneMockProps) {
-  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings"
-  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings">("home");
-  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings">("home");
+  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator"
+  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
+  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
   const [bottomTab, setBottomTab] = useState<"home" | "downloads" | "settings">("home");
   
   // Custom interactive permission dialog simulator
@@ -67,7 +72,32 @@ export default function PhoneMock({
     return () => clearInterval(interval);
   }, []);
 
-  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings") => {
+  useEffect(() => {
+    const initializeAdMob = async () => {
+      try {
+        await AdMob.initialize({
+          initializeForTesting: true,
+        });
+        
+        // Show persistent Android test Banner Ad at the bottom-center of the screen canvas
+        await AdMob.showBanner({
+          adId: "ca-app-pub-3940256099942544/6300978111", // Official Android Test Ad ID
+          adSize: BannerAdSize.BANNER,
+          position: BannerAdPosition.BOTTOM_CENTER,
+          margin: 0,
+          isTesting: true,
+        });
+
+        console.log("[AdMob] Banner loaded successfully at BOTTOM_CENTER");
+      } catch (err) {
+        console.warn("[AdMob] Safe initialization bypass (e.g. running on browser):", err);
+      }
+    };
+
+    initializeAdMob();
+  }, []);
+
+  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator") => {
     setLastScreen(currentScreen);
     setCurrentScreen(screen);
     // Sync bottom active bar indicator
@@ -83,7 +113,7 @@ export default function PhoneMock({
     }
   };
 
-  const handleAddDownloadedFile = (name: string, data: string, type: "srt" | "audio" | "video", audioUrl?: string) => {
+  const handleAddDownloadedFile = (name: string, data: string, type: "srt" | "audio" | "video", audioUrl?: string, url?: string) => {
     const sizeMap = {
       srt: "4 KB",
       audio: "1.2 MB",
@@ -97,7 +127,8 @@ export default function PhoneMock({
       timestamp: new Date().toLocaleDateString(),
       size: sizeMap[type],
       data,
-      audioUrl
+      audioUrl,
+      url: type === "video" ? data : url
     };
     setDownloadedFiles((prev) => [newFile, ...prev]);
   };
@@ -147,7 +178,7 @@ export default function PhoneMock({
               </span>
             </div>
             <p className="text-[10px] text-slate-400 font-sans mt-0.5 hidden sm:block">
-              Premium Universal Video Downloader • AI Subtitle Sync Aligner • Long-form Vocal Edge TTS Engine
+              Premium Universal Video Downloader • AI Subtitle Sync Aligner • Text to Voice Engine
             </p>
           </div>
         </div>
@@ -238,7 +269,7 @@ export default function PhoneMock({
               Permission Restricted
             </h4>
             <p className="text-[10px] text-slate-300 leading-relaxed">
-              Without filesystem authorization, downloads and TTS vocal tracks can't map into internal public folders (and won't scan into CapCut). For a production build, please allow permissions in Settings.
+              Without filesystem authorization, downloads and Text to Voice vocal tracks can't map into internal public folders (and won't scan into CapCut). For a production build, please allow permissions in Settings.
             </p>
             <div className="flex gap-2">
               <button
@@ -281,7 +312,7 @@ export default function PhoneMock({
         <div className="flex-1 overflow-hidden">
           <div className="max-w-5xl mx-auto w-full h-full flex flex-col min-h-0">
           {currentScreen === "home" && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 scrollbar-thin select-none">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 sm:pb-32 scrollbar-thin select-none">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
                 
                 {/* Column 1: Info, Stats, & Live Compliance */}
@@ -338,22 +369,49 @@ export default function PhoneMock({
                     Core Studio Suites
                   </div>
 
-                  {/* Downloader Card */}
+                  {/* Voice to Text (Gemini) Card */}
                   <div
                     onClick={() => handlePushScreen("downloader")}
-                    className="bg-white/95 border-2 border-white/65 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(59,130,246,0.3)] hover:shadow-[0_30px_55px_rgba(59,130,246,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-white active:scale-[0.98] group relative overflow-hidden text-left"
+                    className="bg-indigo-950/45 border-2 border-indigo-500/20 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(99,102,241,0.2)] hover:shadow-[0_30px_55px_rgba(99,102,241,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-indigo-950/60 active:scale-[0.98] group relative overflow-hidden text-left"
                   >
-                    <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
                     <div className="flex items-start gap-4">
-                      <div className="p-3.5 bg-blue-500 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-blue-500/30">
-                        <Download className="w-5 h-5 animate-bounce" style={{ animationDuration: '3s' }} />
+                      <div className="p-3.5 bg-indigo-600 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-indigo-500/30">
+                        <Mic className="w-5 h-5 animate-pulse" />
                       </div>
                       <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-blue-600 transition-colors">
-                          Universal Video Downloader
+                        <h3 className="text-sm font-extrabold text-white tracking-wide group-hover:text-indigo-400 transition-colors flex flex-wrap items-center gap-1.5 font-sans">
+                          <span>Voice to Text</span>
+                          <span className="text-[8px] bg-indigo-500 text-white font-extrabold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            GEMINI API REQUIRED
+                          </span>
                         </h3>
-                        <p className="text-xs text-slate-800 font-medium leading-relaxed mt-2.5">
-                          လင့်ခ်ကို ကူးယူထည့်သွင်းရုံဖြင့် ဗီဒီယိုများကို ချက်ချင်းဒေါင်းလုဒ်ဆွဲနိုင်မည့်စနစ်။ နောက်ကွယ်တွင် လုပ်ငန်းစဉ်အများအပြားကို တစ်ပြိုင်နက် မောင်းနှင်ပေးနိုင်သည်။
+                        <p className="text-xs text-slate-300 font-semibold leading-relaxed mt-2.5">
+                          အသံဖိုင်နှင့် ဗီဒီယိုဖိုင်များ (MP3/WAV/MP4/MOV စသည်) မှ စာသားကို အဆင့်မြင့် Gemini API စနစ်ဖြင့် ဖတ်ယူပေးနိုင်သည်။ စာသားသီးသန့် သို့မဟုတ် စာတန်းထိုး (.SRT) ဖိုင်များကို ချက်ချင်းထုတ်ယူနိုင်သည်။
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Translator (Gemini) Card */}
+                  <div
+                    onClick={() => handlePushScreen("translator")}
+                    className="bg-emerald-950/40 border-2 border-emerald-500/20 rounded-3xl p-5 cursor-pointer shadow-[0_25px_45px_rgba(16,185,129,0.2)] hover:shadow-[0_30px_55px_rgba(16,185,129,0.55)] transition-all duration-350 hover:scale-[1.03] hover:-translate-y-1.5 hover:bg-emerald-950/50 active:scale-[0.98] group relative overflow-hidden text-left"
+                  >
+                    <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                    <div className="flex items-start gap-4">
+                      <div className="p-3.5 bg-emerald-600 text-white rounded-2xl group-hover:scale-110 transition-transform shrink-0 shadow-lg shadow-emerald-500/30">
+                        <Smartphone className="w-5 h-5" />
+                      </div>
+                      <div className="text-left">
+                        <h3 className="text-sm font-extrabold text-white tracking-wide group-hover:text-emerald-450 transition-colors flex flex-wrap items-center gap-1.5 font-sans">
+                          <span>Translator</span>
+                          <span className="text-[8px] bg-emerald-600 text-white font-extrabold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            GEMINI API REQUIRED
+                          </span>
+                        </h3>
+                        <p className="text-xs text-slate-300 font-semibold leading-relaxed mt-2.5">
+                          မြန်မာစာ အပါအဝင် နိုင်ငံတကာဘာသာစကား ၁၃ မျိုးကို အလိုအလျောက် ရွေးချယ်ပြီး ဆီလျော်အောင် တိုက်ရိုက်ဘာသာပြန်ပေးနိုင်သည့် အဆင့်မြင့် Gemini Translator စနစ်။
                         </p>
                       </div>
                     </div>
@@ -370,8 +428,11 @@ export default function PhoneMock({
                         <Sparkles className="w-5 h-5 animate-pulse" />
                       </div>
                       <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-emerald-600 transition-colors">
-                          Premium AI Subtitle Pro
+                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-emerald-600 transition-colors flex flex-wrap items-center gap-1.5">
+                          <span>Premium AI Subtitle Pro</span>
+                          <span className="text-[7.5px] bg-[#FFF0F3] text-rose-600 border border-rose-300/60 font-extrabold px-2.5 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            FREE • NO API KEY REQUIRED • FOR RECAP VIDEO ONLY
+                          </span>
                         </h3>
                         <p className="text-xs text-slate-800 font-medium leading-relaxed mt-2.5">
                           မြန်မာစာလုံးပေါင်း အစီအစဉ်ကို အလိုအလျောက် ညှိပေးမည့်စနစ်။ CapCut အတွက် အဖတ်ရလွယ်ကူပြီး အံကိုက်ဖြစ်စေမည့် .SRT ဖိုင်များကို ထုတ်ပေးသည်။
@@ -391,8 +452,11 @@ export default function PhoneMock({
                         <Volume2 className="w-5 h-5" />
                       </div>
                       <div className="text-left">
-                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-orange-600 transition-colors">
-                          Ultra Long-Form Edge TTS
+                        <h3 className="text-sm font-extrabold text-slate-950 tracking-wide group-hover:text-orange-600 transition-colors flex flex-wrap items-center gap-1.5">
+                          <span>Text to Voice (စာသားမှ အသံပြောင်းစနစ်)</span>
+                          <span className="text-[7.5px] bg-[#FFF8F0] text-orange-600 border border-orange-200/60 font-extrabold px-2.5 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                            FREE • NO API KEY REQUIRED • PRO FEATURES
+                          </span>
                         </h3>
                         <p className="text-xs text-slate-800 font-medium leading-relaxed mt-2.5">
                           စာလုံးရေ ၁၀,၀၀၀ ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
@@ -412,6 +476,15 @@ export default function PhoneMock({
               onAddNotification={onAddNotification} 
               tasks={tasks}
               setTasks={setTasks}
+              onAddDownloadedFile={handleAddDownloadedFile}
+              onQuickAccessSettings={() => handlePushScreen("settings")}
+            />
+          )}
+
+          {currentScreen === "translator" && (
+            <Translator
+              onAddNotification={onAddNotification}
+              onQuickAccessSettings={() => handlePushScreen("settings")}
             />
           )}
 
