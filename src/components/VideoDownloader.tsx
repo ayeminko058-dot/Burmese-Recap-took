@@ -111,7 +111,18 @@ export default function VideoDownloader({
         },
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
+      let data: any = {};
+      
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json().catch(() => ({}));
+      } else {
+        const rawText = await response.text().catch(() => "");
+        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
+          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+        }
+        throw new Error(rawText.substring(0, 100) || "Server network error.");
+      }
 
       if (response.ok && data.valid) {
         setKeyValidationStatus("valid");
@@ -361,7 +372,18 @@ export default function VideoDownloader({
         }),
       });
 
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
+      let data: any = {};
+      
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json().catch(() => ({}));
+      } else {
+        const rawText = await response.text().catch(() => "");
+        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
+          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+        }
+        throw new Error(rawText.substring(0, 100) || "Transcription server error.");
+      }
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to compile transcription.");
@@ -486,7 +508,7 @@ export default function VideoDownloader({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 select-none text-left space-y-5" id="offline-transcription-studio">
+    <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 pb-28 select-none text-left space-y-5" id="offline-transcription-studio">
       
       {/* Header and Branding (Material 3 Card) */}
       <div className="bg-gradient-to-br from-slate-900 via-indigo-950/45 to-slate-950 p-5 rounded-3xl border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3">

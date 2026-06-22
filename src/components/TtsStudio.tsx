@@ -112,8 +112,19 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
       clearInterval(progressTimer);
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || "Local synthesis proxy returned an error. Check key quotas.");
+        const contentType = response.headers.get("content-type");
+        let errorData: any = {};
+        
+        if (contentType && contentType.includes("application/json")) {
+          errorData = await response.json().catch(() => ({}));
+        } else {
+          const rawText = await response.text().catch(() => "");
+          if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
+            throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+          }
+          throw new Error(rawText.substring(0, 100) || "Gateway error from host.");
+        }
+        throw new Error(errorData.error || "တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
       }
 
       const audioBlob = await response.blob();
@@ -245,7 +256,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 bg-[#070B13]">
         {/* Voice setup */}
         <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3">
           <div className="flex items-center justify-between">

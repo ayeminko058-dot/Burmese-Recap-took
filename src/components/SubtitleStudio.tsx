@@ -691,7 +691,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 bg-[#070B13]">
         {/* Main Grid View */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           

@@ -237,35 +237,21 @@ app.post("/api/tts", async (req, res) => {
 
     console.log(`Processing Edge TTS Request: Split script into ${cleanedChunks.length} chunks for voice: ${selectedVoice}, rate: ${finalRate}, pitch: ${finalPitch}`);
 
-    const audioBuffers: Buffer[] = [];
-
-    // Process each chunk sequentially to guarantee order and aggregate the raw binary audio blocks
-    for (let i = 0; i < cleanedChunks.length; i++) {
-      const chunkText = cleanedChunks[i];
-      
-      // Clean text input stripping: Ensure that the raw text ONLY includes the actual words, sanitizing XML brackets
+    // Fetch all audio chunks in parallel using Promise.all to prevent Vercel serverless timeouts
+    const chunkPromises = cleanedChunks.map(async (chunkText, i) => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-
       try {
         const isMyanmar = selectedVoice.startsWith("my-") || selectedVoice.includes("my-MM");
-        let response;
+        let response = null;
 
-        // Assign to variables as specified by standard Communicate interface schema
         const voice = selectedVoice;
         const rate = finalRate;
         const pitch = finalPitch;
 
-        // Added backend logging to output standard VOICE, RATE, PITCH for audit tracking
-        console.log("VOICE:", voice);
-        console.log("RATE:", rate);
-        console.log("PITCH:", pitch);
-
         if (isMyanmar) {
-          // Reconstruct the final SSML XML string block using exact specifications:
           const ssmlText = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='my-MM'><voice name='${voice}'><prosody rate='${rate}' pitch='${pitch}'>${sanitizedText}</prosody></voice></speak>`;
 
           try {
-            // Resilient Try 1: POST payload directly with application/ssml+xml
             response = await fetch(`https://my-edge-tts-api.vercel.app/api/tts?voice=${selectedVoice}`, {
               method: "POST",
               headers: {
@@ -275,7 +261,6 @@ app.post("/api/tts", async (req, res) => {
               body: ssmlText
             });
 
-            // If raw POST fails or isn't supported, try Try 2: POST JSON body
             if (!response || !response.ok) {
               response = await fetch("https://my-edge-tts-api.vercel.app/api/tts", {
                 method: "POST",
@@ -290,17 +275,14 @@ app.post("/api/tts", async (req, res) => {
               });
             }
           } catch (postError) {
-            console.warn("POSTing SSML with custom style settings was rejected. Proceeding to fallback query params.", postError);
+            console.warn("POST SSML error for chunk index:", i, postError);
           }
 
-          // Try 3: If POST both rejected, fallback to extremely clean GET with query parameters including rate/pitch
           if (!response || !response.ok) {
-            console.log(`Using fallback query parameters for styled Myanmar synthesis: rate=${rate}, pitch=${pitch}`);
             const fallbackUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
             response = await fetch(fallbackUrl);
           }
         } else {
-          // Standard plain-text GET for non-Myanmar english/international voices, now passing style parameters!
           const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
           response = await fetch(ttsUrl);
         }
@@ -309,11 +291,22 @@ app.post("/api/tts", async (req, res) => {
           throw new Error(`Edge TTS API responded with status ${response ? response.status : "No Response"}`);
         }
         const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        audioBuffers.push(buffer);
+        return { index: i, buffer: Buffer.from(arrayBuffer) };
       } catch (chunkError) {
-        console.error(`Error processing chunk ${i} ("${chunkText.slice(0, 20)}..."):`, chunkError);
-        // We continue to avoid completely failing the request if just one chunk fails
+        console.error(`Error processing chunk index ${i}:`, chunkError);
+        return { index: i, buffer: null };
+      }
+    });
+
+    const results = await Promise.all(chunkPromises);
+
+    // Sort results by original index to preserve voice audio segment order
+    results.sort((a, b) => a.index - b.index);
+
+    const audioBuffers: Buffer[] = [];
+    for (const r of results) {
+      if (r.buffer) {
+        audioBuffers.push(r.buffer);
       }
     }
 

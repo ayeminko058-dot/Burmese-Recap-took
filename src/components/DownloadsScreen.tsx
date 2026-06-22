@@ -68,7 +68,7 @@ export default function DownloadsScreen({ files, onDeleteFile, onAddNotification
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-3 bg-[#070B13]">
         {files.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full py-16 text-center text-slate-500">
             <FolderOpen className="w-12 h-12 text-slate-600 mb-3 stroke-[1.5]" />

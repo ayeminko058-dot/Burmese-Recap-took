@@ -2,8 +2,9 @@ import React, { useState, useEffect } from "react";
 import { 
   Home, Download, Settings, Wifi, Battery, Shield, ShieldAlert, Cpu, 
   FolderOpen, Smartphone, Sparkles, Volume2, ArrowLeft, RefreshCw, X, Bell,
-  Mic, FileAudio, FileVideo 
+  Mic, FileAudio, FileVideo, AlertTriangle 
 } from "lucide-react";
+import { Capacitor } from "@capacitor/core";
 import { AdMob, BannerAdSize, BannerAdPosition } from "@capacitor-community/admob";
 import VideoDownloader from "./VideoDownloader";
 import SubtitleStudio from "./SubtitleStudio";
@@ -12,6 +13,7 @@ import DownloadsScreen from "./DownloadsScreen";
 import SettingsScreen from "./SettingsScreen";
 import Translator from "./Translator";
 import { DownloadTask, AppNotification } from "../types";
+import { initializeAdMob } from "../utils/admob";
 
 interface SavedFile {
   id: string;
@@ -121,38 +123,29 @@ export default function PhoneMock({
   }, []);
 
   useEffect(() => {
-    const initializeAdMob = async () => {
+    const startupAdMob = async () => {
       try {
-        await AdMob.initialize({
-          initializeForTesting: true,
-        });
-        
-        // Show persistent Android test Banner Ad at the bottom-center of the screen canvas
-        await AdMob.showBanner({
-          adId: "ca-app-pub-3940256099942544/6300978111", // Official Android Test Ad ID
-          adSize: BannerAdSize.BANNER,
-          position: BannerAdPosition.BOTTOM_CENTER,
-          margin: 0,
-          isTesting: true,
-        });
+        // Global initialization of AdMob on App Mount
+        await initializeAdMob();
 
-        console.log("[AdMob] Banner loaded successfully at BOTTOM_CENTER");
-
-        // Strict pre-loading of Reward Video Ad on app mount
-        try {
-          await AdMob.prepareRewardVideoAd({
-            adId: "ca-app-pub-3940256099942544/5224354917", // Demo Reward Ad ID
+        // If on native, trigger the real Test Banner
+        if (Capacitor.getPlatform() !== "web") {
+          console.log("[AdMob] Banner request started");
+          await AdMob.showBanner({
+            adId: "ca-app-pub-3940256099942544/6300978111", // Official Android Test Banner Ad ID
+            adSize: BannerAdSize.BANNER,
+            position: BannerAdPosition.BOTTOM_CENTER,
+            margin: 0,
+            isTesting: true,
           });
-          console.log("[AdMob] Reward video preloaded successfully");
-        } catch (rewardErr) {
-          console.warn("[AdMob] Reward video preload bypassed:", rewardErr);
+          console.log("[AdMob] Banner loaded successfully at BOTTOM_CENTER");
         }
       } catch (err) {
-        console.warn("[AdMob] Safe initialization bypass (e.g. running on browser):", err);
+        console.warn("[AdMob] Safe initialization bypass or error during startup:", err);
       }
     };
 
-    initializeAdMob();
+    startupAdMob();
   }, []);
 
   const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator") => {
@@ -370,161 +363,179 @@ export default function PhoneMock({
         <div className="flex-1 overflow-hidden">
           <div className="max-w-5xl mx-auto w-full h-full flex flex-col min-h-0">
           {currentScreen === "home" && (
-            <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-24 sm:pb-32 scrollbar-thin select-none">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
-                
-                {/* Column 1: Info, Stats, & Live Compliance */}
-                <div className="space-y-6 text-left">
-                  {/* Branded Banner & Modern Card */}
-                  <div className="bg-gradient-to-br from-[#121A2E]/80 to-[#0F172A]/80 border border-slate-800/80 p-6 rounded-3xl relative overflow-hidden backdrop-blur-sm shadow-xl">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-2xl pointer-events-none" />
-                    <span className="text-[9px] bg-blue-500/10 text-blue-400 py-1 px-2.5 rounded-full font-mono font-bold uppercase tracking-wider border border-blue-500/15">
-                      Premium AI Creator Studio
-                    </span>
-                    <h1 className="text-xl font-extrabold tracking-tight text-white mt-4 leading-tight font-sans">
-                      Burmese Recap Tool
-                    </h1>
-                    <p className="text-xs text-slate-300 leading-relaxed mt-2.5">
-                      The industry-first AI-assisted narration alignment workshop tailored for Myanmar language video producers. Automatically parses Unicode syllables, aligns voice-overs, and exports flawless subtitle streams.
+            <div className="flex-1 flex flex-col min-h-0 h-full">
+              {/* FIXED ENVIRONMENT COMPLIANCE WARNING */}
+              {!Capacitor.isNativePlatform() && (
+                <div className="mx-4 mt-4 bg-amber-500/10 border-2 border-amber-500/20 rounded-2xl p-4 text-left relative overflow-hidden flex gap-3 my-1">
+                  <div className="p-2 bg-amber-500/10 text-amber-550 rounded-xl shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />
+                  </div>
+                  <div>
+                    <h4 className="text-[11px] font-extrabold text-amber-500 tracking-wide uppercase">AdMob Native Warning</h4>
+                    <p className="text-[10px] text-slate-300 mt-0.5 leading-relaxed font-sans">
+                      AdMob native ads cannot display inside browser previews. A native Android APK/AAB build is required. A live test visual simulator is displayed below.
                     </p>
-                    <div className="pt-4 flex items-center gap-4 text-[10px] text-slate-400">
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        <span>Active Sandbox Mode</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                        <span>Chrome-optimized</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Device Compliance Widget */}
-                  <div className="bg-gradient-to-br from-[#1A2333]/75 to-[#121824]/75 border border-slate-800/80 p-5 rounded-3xl relative overflow-hidden shadow-md">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-3">Device Compliance & Integration</span>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center bg-[#0F172A]/80 p-3 rounded-2xl border border-slate-800/50">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2.5 h-2.5 rounded-full ${permissionGranted ? 'bg-emerald-500 shadow-sm shadow-emerald-500/30' : 'bg-rose-500'}`} />
-                          <span className="text-xs font-medium text-slate-200">Foreground Sync Node</span>
-                        </div>
-                        <span className="text-[9px] text-slate-400 select-none font-mono">SDK 34 (Android 14)</span>
-                      </div>
-                      <div className="flex justify-between items-center bg-[#0F172A]/80 p-3 rounded-2xl border border-slate-800/50">
-                        <div className="flex items-center gap-2">
-                          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
-                          <span className="text-xs font-medium text-slate-200">CapCut SRT Connector</span>
-                        </div>
-                        <span className="text-[9px] text-emerald-400 select-none font-mono font-semibold uppercase">Initialized</span>
-                      </div>
-                    </div>
                   </div>
                 </div>
+              )}
 
-                {/* Column 2: Three Core Interactive Studio Cards */}
-                <div className="space-y-3.5">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 select-none text-left">
-                    Core Studio Suites
-                  </div>
-
-                  {/* Voice to Text (Gemini) Card */}
-                  <div
-                    onClick={() => handlePushScreen("downloader")}
-                    className="bg-indigo-950/45 border-2 border-indigo-500/15 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(99,102,241,0.15)] hover:shadow-[0_20px_40px_rgba(99,102,241,0.4)] transition-all duration-300 hover:scale-[1.015] hover:bg-indigo-950/60 active:scale-[0.985] group relative overflow-hidden text-left"
-                  >
-                    <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-3">
-                      <div className="p-2.5 bg-indigo-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-indigo-500/20">
-                        <Mic className="w-4 h-4 animate-pulse" />
+              {/* Scrolling Dashboard Grid */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-48 scrollbar-thin select-none">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+                  
+                  {/* Column 1: Info, Stats, & Live Compliance */}
+                  <div className="space-y-4 text-left">
+                    {/* Branded Banner & Modern Card */}
+                    <div className="bg-gradient-to-br from-[#121A2E]/80 to-[#0F172A]/80 border border-slate-800/80 p-5 rounded-3xl relative overflow-hidden backdrop-blur-sm shadow-xl">
+                      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-2xl pointer-events-none" />
+                      <span className="text-[9px] bg-blue-500/10 text-blue-400 py-1 px-2.5 rounded-full font-mono font-bold uppercase tracking-wider border border-blue-500/15">
+                        Premium AI Creator Studio
+                      </span>
+                      <h1 className="text-xl font-extrabold tracking-tight text-white mt-3 leading-tight font-sans">
+                        Burmese Recap Tool
+                      </h1>
+                      <p className="text-[11px] text-slate-300 leading-relaxed mt-2">
+                        The industry-first AI-assisted narration alignment workshop tailored for Myanmar language video producers. Automatically parses Unicode syllables, aligns voice-overs, and exports flawless subtitle streams.
+                      </p>
+                      <div className="pt-3.5 flex items-center gap-4 text-[10px] text-slate-400">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          <span>Active Sandbox Mode</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                          <span>Chrome-optimized</span>
+                        </div>
                       </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <h3 className="text-base font-semibold text-white tracking-wide group-hover:text-indigo-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
-                          <span>Voice to Text</span>
-                          <span className="text-[7px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            GEMINI API
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-300 font-normal leading-relaxed mt-1.5">
-                          အသံဖိုင်နှင့် ဗီဒီယိုဖိုင်များမှ စာသားကို အဆင့်မြင့် Gemini API စနစ်ဖြင့် ဖတ်ယူပေးနိုင်သည်။ စာသားသီးသန့် သို့မဟုတ် စာတန်းထိုး (.SRT) ဖိုင်များကို ချက်ချင်းထုတ်ယူနိုင်သည်။
-                        </p>
+                    </div>
+
+                    {/* Device Compliance Widget */}
+                    <div className="bg-gradient-to-br from-[#1A2333]/75 to-[#121824]/75 border border-slate-800/80 p-4.5 rounded-3xl relative overflow-hidden shadow-md">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2.5">Device Compliance & Integration</span>
+                      <div className="space-y-2.5">
+                        <div className="flex justify-between items-center bg-[#0F172A]/80 p-2.5 rounded-2xl border border-slate-800/50">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${permissionGranted ? 'bg-emerald-500 shadow-sm shadow-emerald-500/30' : 'bg-rose-500'}`} />
+                            <span className="text-xs font-semibold text-slate-200">Foreground Sync Node</span>
+                          </div>
+                          <span className="text-[9px] text-slate-400 select-none font-mono">SDK 34 (Android 14)</span>
+                        </div>
+                        <div className="flex justify-between items-center bg-[#0F172A]/80 p-2.5 rounded-2xl border border-slate-800/50">
+                          <div className="flex items-center gap-2">
+                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
+                            <span className="text-xs font-semibold text-slate-200">CapCut SRT Connector</span>
+                          </div>
+                          <span className="text-[9px] text-emerald-400 select-none font-mono font-semibold uppercase">Initialized</span>
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Translator (Gemini) Card */}
-                  <div
-                    onClick={() => handlePushScreen("translator")}
-                    className="bg-emerald-950/40 border-2 border-emerald-500/15 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(16,185,129,0.15)] hover:shadow-[0_20px_40px_rgba(16,185,129,0.4)] transition-all duration-300 hover:scale-[1.015] hover:bg-emerald-950/50 active:scale-[0.985] group relative overflow-hidden text-left"
-                  >
-                    <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-3">
-                      <div className="p-2.5 bg-emerald-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/20">
-                        <Smartphone className="w-4 h-4" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <h3 className="text-base font-semibold text-white tracking-wide group-hover:text-emerald-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
-                          <span>Translator</span>
-                          <span className="text-[7px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            GEMINI API
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-300 font-normal leading-relaxed mt-1.5">
-                          မြန်မာစာ အပါအဝင် နိုင်ငံတကာဘာသာစကား ၁၃ မျိုးကို အလိုအလျောက် ရွေးချယ်ပြီး ဆီလျော်အောင် တိုက်ရိုက်ဘာသာပြန်ပေးနိုင်သည့် အဆင့်မြင့် Gemini Translator စနစ်။
-                        </p>
-                      </div>
+                  {/* Column 2: Three Core Interactive Studio Cards */}
+                  <div className="space-y-2.5">
+                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-widest pl-1 select-none text-left">
+                      Core Studio Suites
                     </div>
-                  </div>
 
-                  {/* Subtitle Card */}
-                  <div
-                    onClick={() => handlePushScreen("subtitle")}
-                    className="bg-[#FFF0F3]/95 border-2 border-white/60 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(16,185,129,0.2)] hover:shadow-[0_20px_40px_rgba(16,185,129,0.4)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
-                  >
-                    <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-3">
-                      <div className="p-2.5 bg-emerald-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/25">
-                        <Sparkles className="w-4 h-4 animate-pulse" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <h3 className="text-base font-semibold text-slate-950 tracking-wide group-hover:text-emerald-700 transition-colors flex items-center justify-between gap-1.5">
-                          <span>AI Subtitle Pro</span>
-                          <span className="text-[7px] bg-[#FFF0F3] text-rose-600 border border-rose-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            FREE • NO API KEY
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-800 font-normal leading-relaxed mt-1.5">
-                          မြန်မာစာလုံးပေါင်း အစီအစဉ်ကို အလိုအလျောက် ညှိပေးမည့်စနစ်။ CapCut အတွက် အဖတ်ရလွယ်ကူပြီး အံကိုက်ဖြစ်စေမည့် .SRT ဖိုင်များကို ထုတ်ပေးသည်။
-                        </p>
+                    {/* Voice to Text (Gemini) Card */}
+                    <div
+                      onClick={() => handlePushScreen("downloader")}
+                      className="bg-indigo-950/45 border-2 border-indigo-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(99,102,241,0.1)] hover:shadow-[0_18px_32px_rgba(99,102,241,0.3)] transition-all duration-300 hover:scale-[1.015] hover:bg-indigo-950/60 active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-indigo-500/10 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-indigo-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-indigo-500/20">
+                          <Mic className="w-4 h-4" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-indigo-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
+                            <span>Voice to Text</span>
+                            <span className="text-[7px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              GEMINI API
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            အသံဖိုင်နှင့် ဗီဒီယိုဖိုင်များမှ စာသားကို အဆင့်မြင့် Gemini API စနစ်ဖြင့် ဖတ်ယူပေးနိုင်သည်။ စာသားသီးသန့် သို့မဟုတ် စာတန်းထိုး (.SRT) ဖိုင်များကို ချက်ချင်းထုတ်ယူနိုင်သည်။
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
 
-                  {/* TTS Card */}
-                  <div
-                    onClick={() => handlePushScreen("tts")}
-                    className="bg-orange-50/95 border-2 border-white/60 rounded-2xl p-3.5 cursor-pointer shadow-[0_15px_30px_rgba(245,158,11,0.2)] hover:shadow-[0_20px_40px_rgba(245,158,11,0.4)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
-                  >
-                    <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/5 rounded-full blur-xl pointer-events-none" />
-                    <div className="flex items-start gap-3">
-                      <div className="p-2.5 bg-orange-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-orange-500/25">
-                        <Volume2 className="w-4 h-4" />
-                      </div>
-                      <div className="text-left flex-1 min-w-0">
-                        <h3 className="text-base font-semibold text-slate-950 tracking-wide group-hover:text-orange-700 transition-colors flex items-center justify-between gap-1.5">
-                          <span>Text to Voice</span>
-                          <span className="text-[7px] bg-[#FFF8F0] text-orange-600 border border-orange-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                            FREE • PRO FEATURES
-                          </span>
-                        </h3>
-                        <p className="text-xs text-slate-800 font-normal leading-relaxed mt-1.5">
-                          စာလုံးရေ ၁၀,၀၀0 ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
-                        </p>
+                    {/* Translator (Gemini) Card */}
+                    <div
+                      onClick={() => handlePushScreen("translator")}
+                      className="bg-emerald-950/40 border-2 border-emerald-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(16,185,129,0.1)] hover:shadow-[0_18px_32px_rgba(16,185,129,0.3)] transition-all duration-300 hover:scale-[1.015] hover:bg-emerald-950/50 active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-emerald-600 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/20">
+                          <Smartphone className="w-4 h-4" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-emerald-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
+                            <span>Translator</span>
+                            <span className="text-[7px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/20 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              GEMINI API
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            မြန်မာစာ အပါအဝင် နိုင်ငံတကာဘာသာစကား ၁၃ မျိုးကို အလိုအလျောက် ရွေးချယ်ပြီး ဆီလျော်အောင် တိုက်ရိုက်ဘာသာပြန်ပေးနိုင်သည့် အဆင့်မြင့် Gemini Translator စနစ်။
+                          </p>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Subtitle Card */}
+                    <div
+                      onClick={() => handlePushScreen("subtitle")}
+                      className="bg-[#FFF0F3]/95 border-2 border-white/60 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(16,185,129,0.1)] hover:shadow-[0_18px_32px_rgba(16,185,129,0.3)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-emerald-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/25">
+                          <Sparkles className="w-4 h-4 animate-pulse" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-slate-905 tracking-wide group-hover:text-emerald-700 transition-colors flex items-center justify-between gap-1.5">
+                            <span>AI Subtitle Pro</span>
+                            <span className="text-[7px] bg-[#FFF0F3] text-rose-600 border border-rose-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              FREE • NO API KEY
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-800 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            မြန်မာစာလုံးပေါင်း အစီအစဉ်ကို အလိုအလျောက် ညှိပေးမည့်စနစ်။ CapCut အတွက် အဖတ်ရလွယ်ကူပြီး အံကိုက်ဖြစ်စေမည့် .SRT ဖိုင်များကို ထုတ်ပေးသည်။
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* TTS Card */}
+                    <div
+                      onClick={() => handlePushScreen("tts")}
+                      className="bg-orange-50/95 border-2 border-white/60 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(245,158,11,0.1)] hover:shadow-[0_18px_32px_rgba(245,158,11,0.3)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/5 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-orange-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-orange-500/25">
+                          <Volume2 className="w-4 h-4" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-slate-905 tracking-wide group-hover:text-orange-700 transition-colors flex items-center justify-between gap-1.5">
+                            <span>Text to Voice</span>
+                            <span className="text-[7px] bg-[#FFF8F0] text-orange-600 border border-orange-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              FREE • PRO FEATURES
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-800 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            စာလုံးရေ ၁၀,၀၀0 ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
 
                 </div>
-
               </div>
             </div>
           )}
@@ -579,42 +590,66 @@ export default function PhoneMock({
         </div>
       </div>
 
-      {/* MOBILE BOTTOM NAVIGATION BAR - Sticky & raised slightly to avoid system back/home gesture conflict */}
-      <div className="shrink-0 bg-[#090D18] border-t border-[#1E293B] w-full z-50 pb-[24px] sm:pb-[32px] pt-1.5">
-        <div className="max-w-5xl mx-auto h-16 px-12 md:px-24 flex items-center justify-between">
+      {/* BOTTOM PERSISTENT REGION - Floating elegantly with Safe Area bottom spacing */}
+      <div className="absolute bottom-0 left-0 right-0 z-50 pointer-events-none flex flex-col items-center gap-3 px-4 pb-[calc(14px+env(safe-area-inset-bottom))] mb-[env(safe-area-inset-bottom)] select-none">
+        
+        {/* DEDICATED FLOATING BANNER AD SPACE - Floating directly above Bottom Navigation on Home Screen */}
+        {currentScreen === "home" && (
+          <div className="w-full max-w-sm bg-[#0D1321]/95 py-2.5 flex justify-center border border-slate-800/80 rounded-2xl pointer-events-auto shadow-2xl relative overflow-hidden animate-fade-in shrink-0">
+            <div className="w-[320px] h-[50px] bg-[#090D18] border border-amber-500/30 rounded-xl flex items-center justify-between px-3 text-left relative overflow-hidden">
+              <div className="absolute top-0 right-0 text-[6.5px] bg-amber-500 text-[#070B13] font-black uppercase py-0.5 px-2 rounded-bl font-sans">AdMob Test</div>
+              <div>
+                <div className="text-[10px] font-black text-slate-200 tracking-wide font-sans">Google Test Banner (320x50)</div>
+                <div className="text-[8px] text-slate-400 mt-0.5 font-mono">ID: ca-app-pub-3940256099942544/6300978111</div>
+              </div>
+              <div className="text-[9px] bg-emerald-500/10 text-emerald-400 font-mono py-1 px-2 rounded-lg border border-emerald-500/20 font-extrabold uppercase animate-pulse shrink-0">
+                ACTIVE
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* PREMIUM FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR */}
+        <div className="w-full max-w-sm bg-[#0D1321]/90 backdrop-blur-lg border border-slate-800/80 rounded-2xl pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.8)] py-3 px-6 flex items-center justify-between shrink-0">
           <button
             onClick={() => handlePushScreen("home")}
-            className={`flex flex-col items-center gap-1 focus:outline-none transition-colors ${
-              bottomTab === "home" ? "text-blue-500" : "text-slate-500 hover:text-slate-300"
+            className={`flex-1 flex flex-col items-center gap-1.5 focus:outline-none transition-all duration-300 ${
+              bottomTab === "home" 
+                ? "text-blue-400 scale-105 filter drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]" 
+                : "text-slate-500 hover:text-slate-350"
             }`}
           >
-            <Home className="w-5 h-5" />
-            <span className="text-[8px] font-semibold tracking-wide uppercase">Home</span>
+            <Home className="w-5.5 h-5.5" />
+            <span className="text-[9px] font-extrabold tracking-wide uppercase font-sans">Home</span>
           </button>
 
           <button
             onClick={() => handlePushScreen("downloads")}
-            className={`flex flex-col items-center gap-1 focus:outline-none transition-colors relative ${
-              bottomTab === "downloads" ? "text-blue-500" : "text-slate-500 hover:text-slate-300"
+            className={`flex-1 flex flex-col items-center gap-1.5 focus:outline-none transition-all duration-300 relative ${
+              bottomTab === "downloads" 
+                ? "text-blue-400 scale-105 filter drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]" 
+                : "text-slate-500 hover:text-slate-350"
             }`}
           >
             {downloadedFiles.length > 0 && (
-              <span className="absolute -top-1 -right-1.5 w-4 h-4 bg-orange-500 text-white rounded-full text-[8px] font-bold flex items-center justify-center font-mono animate-bounce">
+              <span className="absolute -top-1 right-[20%] w-4.5 h-4.5 bg-orange-500 text-white rounded-full text-[8.5px] font-black flex items-center justify-center font-mono animate-bounce z-10 shadow-md">
                 {downloadedFiles.length}
               </span>
             )}
-            <FolderOpen className="w-5 h-5" />
-            <span className="text-[8px] font-semibold tracking-wide uppercase">Files</span>
+            <FolderOpen className="w-5.5 h-5.5" />
+            <span className="text-[9px] font-extrabold tracking-wide uppercase font-sans">Files</span>
           </button>
 
           <button
             onClick={() => handlePushScreen("settings")}
-            className={`flex flex-col items-center gap-1 focus:outline-none transition-colors ${
-              bottomTab === "settings" ? "text-blue-500" : "text-slate-500 hover:text-slate-300"
+            className={`flex-1 flex flex-col items-center gap-1.5 focus:outline-none transition-all duration-300 ${
+              bottomTab === "settings" 
+                ? "text-blue-400 scale-105 filter drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]" 
+                : "text-slate-500 hover:text-slate-350"
             }`}
           >
-            <Settings className="w-5 h-5" />
-            <span className="text-[8px] font-semibold tracking-wide uppercase">Settings</span>
+            <Settings className="w-5.5 h-5.5" />
+            <span className="text-[9px] font-extrabold tracking-wide uppercase font-sans">Settings</span>
           </button>
         </div>
       </div>

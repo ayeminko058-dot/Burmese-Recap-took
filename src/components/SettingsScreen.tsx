@@ -81,7 +81,19 @@ export default function SettingsScreen({
         }
       });
       
-      const data = await response.json();
+      const contentType = response.headers.get("content-type");
+      let data: any = {};
+      
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json().catch(() => ({}));
+      } else {
+        const rawText = await response.text().catch(() => "");
+        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
+          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+        }
+        throw new Error(rawText.substring(0, 100) || "Server error.");
+      }
+
       if (response.ok && data.valid) {
         setValidationStatus("valid");
         onAddNotification("API key verified", "Gemini validation handshake passed.", "success");
@@ -112,7 +124,7 @@ export default function SettingsScreen({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 bg-[#070B13]">
         
         {/* Dedicated Gemini API key Settings section */}
         <div className="bg-[#1A2333]/90 border border-slate-800 rounded-2xl p-4 space-y-3.5">
