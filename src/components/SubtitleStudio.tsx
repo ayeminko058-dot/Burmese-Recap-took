@@ -675,7 +675,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
       {/* Mini Title bar strip-down branding compliant */}
       <div className="p-4 border-b border-[#1E293B] bg-[#0D1321] shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
+          <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
             <Layout className="w-5 h-5" />
           </div>
           <div>
@@ -700,14 +700,14 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
             
             {/* 1. Target Media Stream */}
             <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-4 space-y-3 relative overflow-hidden">
-              <h3 className="text-xs font-bold text-slate-200 flex items-center gap-2 uppercase tracking-wider">
-                <span className="text-blue-500 font-bold">◆</span>
+              <h3 className="text-xs font-bold text-slate-250 flex items-center gap-2 uppercase tracking-wider">
+                <span className="text-cyan-500 font-bold">◆</span>
                 1. Target Media Stream
               </h3>
               
               <div 
                 onClick={() => fileInputRef.current?.click()}
-                className="border-2 border-dashed border-[#1E293B] hover:border-blue-500/50 hover:bg-blue-500/5 rounded-xl p-3 text-center cursor-pointer transition duration-200"
+                className="border-2 border-dashed border-[#1E293B] hover:border-cyan-500/50 hover:bg-cyan-500/5 rounded-xl p-3 text-center cursor-pointer transition duration-200"
               >
                 <input 
                   type="file" 
@@ -717,14 +717,14 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                   onChange={handleFileChange} 
                 />
                 <div className="flex items-center justify-center gap-3">
-                  <div className="p-2 rounded-lg bg-blue-500/10 text-blue-400">
+                  <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400">
                     <Upload className="w-4 h-4" />
                   </div>
                   <div className="text-left">
                     <p className="text-xs font-semibold text-slate-300 truncate max-w-[240px]">
                       {mediaFileName}
                     </p>
-                    <p className="text-[10px] text-slate-500">
+                    <p className="text-[10px] text-slate-400">
                       Size: {mediaFileSize} — Click to load custom file
                     </p>
                   </div>
@@ -763,7 +763,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                 </div>
                 <div className="bg-[#0D1321] border border-slate-800 p-2.5 rounded-xl text-center">
                   <span className="text-[9px] text-slate-500 uppercase block font-semibold">Avg Millis</span>
-                  <span className="text-sm font-bold text-blue-400 mt-1 block font-mono">{avgDurationPerBlock} ms</span>
+                  <span className="text-sm font-bold text-cyan-400 mt-1 block font-mono">{avgDurationPerBlock} ms</span>
                 </div>
               </div>
             </div>
@@ -772,7 +772,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
             <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-4 space-y-3 flex flex-col justify-between">
               <div>
                 <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center gap-2 mb-1.5">
-                  <span className="text-blue-500">■</span>
+                  <span className="text-cyan-500">■</span>
                   3. Primary Translation Script
                 </h3>
                 <p className="text-[10px] text-slate-400 leading-relaxed mb-3">
@@ -784,7 +784,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
                   placeholder="Type or paste Burmese transcript sentences separated by [ . ] or [ ။ ] ...."
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-250 rounded-xl p-3 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500 font-sans resize-none"
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-250 rounded-xl p-3 focus:outline-none focus:border-cyan-500 transition-colors leading-relaxed placeholder-slate-500 font-sans resize-none"
                 />
               </div>
 
@@ -792,7 +792,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                 <button
                   type="button"
                   onClick={handleAutoAlignment}
-                  className="py-2.5 px-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]"
+                  className="py-2.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-1.5 active:scale-[0.98]"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>Run Proportional Auto-Alignment</span>

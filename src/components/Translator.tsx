@@ -154,10 +154,10 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
     <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 pb-28 select-none text-left space-y-5" id="translator-studio">
       
       {/* Header and Branding (Material 3 Card) */}
-      <div className="bg-gradient-to-br from-slate-900 via-indigo-950/45 to-slate-950 p-5 rounded-3xl border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+      <div className="bg-gradient-to-br from-slate-900 via-emerald-950/30 to-slate-950 p-5 rounded-3xl border border-emerald-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
         <div className="flex items-center gap-2.5">
-          <div className="p-2 bg-indigo-500/10 text-indigo-400 rounded-2xl border border-indigo-500/20">
-            <Languages className="w-5 h-5 text-indigo-400" />
+          <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
+            <Languages className="w-5 h-5 text-emerald-400" />
           </div>
           <div>
             <h1 className="text-base font-bold text-white tracking-wide">
@@ -206,7 +206,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           <select 
             value={sourceLang}
             onChange={(e) => setSourceLang(e.target.value)}
-            className="w-full bg-[#0D1321] text-slate-100 text-xs px-3.5 py-3 rounded-2xl border border-slate-800 focus:border-indigo-505 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors"
+            className="w-full bg-[#0D1321] text-slate-100 text-xs px-3.5 py-3 rounded-2xl border border-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
           >
             <option value="Auto Detect">✨ Auto Detect Language</option>
             {LANGUAGES.map((lang) => (
@@ -222,7 +222,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           className={`p-3 rounded-2xl border transition-all mt-4 self-center shrink-0 ${
             sourceLang === "Auto Detect"
               ? "bg-slate-950 border-slate-900 text-slate-600 cursor-not-allowed"
-              : "bg-[#0D1321] border-slate-800 text-indigo-400 hover:text-white hover:border-indigo-500 hover:bg-indigo-500/10 active:scale-95"
+              : "bg-[#0D1321] border-slate-800 text-emerald-400 hover:text-white hover:border-emerald-500 hover:bg-emerald-500/10 active:scale-95"
           }`}
           title="Swap Languages"
         >
@@ -235,7 +235,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           <select 
             value={targetLang}
             onChange={(e) => setTargetLang(e.target.value)}
-            className="w-full bg-[#0D1321] text-slate-100 text-xs px-3.5 py-3 rounded-2xl border border-slate-800 focus:border-indigo-505 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition-colors"
+            className="w-full bg-[#0D1321] text-slate-100 text-xs px-3.5 py-3 rounded-2xl border border-slate-800 focus:border-emerald-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 transition-colors"
           >
             {LANGUAGES.map((lang) => (
               <option key={lang} value={lang}>{lang}</option>
@@ -292,7 +292,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           {/* Action indicator loop */}
           {status === "translating" && (
             <div className="absolute inset-0 bg-slate-950/70 backdrop-blur-sm rounded-3xl flex flex-col items-center justify-center space-y-2 z-10 animate-fade-in select-none">
-              <Loader2 className="w-8 h-8 text-indigo-400 animate-spin" />
+              <Loader2 className="w-8 h-8 text-emerald-400 animate-spin" />
               <p className="text-xs font-bold text-slate-200">Gemini translates...</p>
               <p className="text-[9px] text-slate-400 font-mono">Invoking model: gemini-3.5-flash</p>
             </div>
@@ -300,7 +300,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
 
           <div className="space-y-2 flex-1 flex flex-col select-text">
             <div className="flex justify-between items-center select-none">
-              <span className="text-[10px] text-indigo-400 uppercase tracking-widest font-bold">Translated Output</span>
+              <span className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">Translated Output</span>
               {translatedText && (
                 <span className="text-[8px] text-slate-500 font-mono">{translatedText.length} characters</span>
               )}
@@ -316,7 +316,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
                 readOnly
                 value={translatedText}
                 placeholder="Translation will appear here..."
-                className="w-full flex-1 min-h-[140px] bg-transparent text-xs text-indigo-200 placeholder-slate-600 resize-none border-none outline-none focus:ring-0 leading-relaxed font-sans cursor-default select-text"
+                className="w-full flex-1 min-h-[140px] bg-transparent text-xs text-emerald-200 placeholder-slate-600 resize-none border-none outline-none focus:ring-0 leading-relaxed font-sans cursor-default select-text"
               />
             )}
           </div>
@@ -325,7 +325,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
             <button
               onClick={handleShare}
               disabled={!translatedText}
-              className={`p-2 rounded-xl text-slate-400 hover:text-indigo-400 hover:bg-indigo-500/10 transition-colors ${
+              className={`p-2 rounded-xl text-slate-400 hover:text-emerald-400 hover:bg-emerald-500/10 transition-colors ${
                 !translatedText ? "opacity-30 cursor-not-allowed" : "cursor-pointer"
               }`}
             >
@@ -352,7 +352,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
         className={`w-full py-4 px-6 rounded-2xl flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-wider transition-all duration-200 ${
           status === "translating" || !inputText.trim()
             ? "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed"
-            : "bg-indigo-650 hover:bg-indigo-600 text-white border border-indigo-500 shadow-lg shadow-indigo-500/10 cursor-pointer"
+            : "bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-lg shadow-emerald-500/10 cursor-pointer"
         }`}
       >
         {status === "translating" ? (

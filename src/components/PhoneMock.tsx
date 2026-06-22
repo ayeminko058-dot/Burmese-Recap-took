@@ -5,6 +5,7 @@ import {
   Mic, FileAudio, FileVideo, AlertTriangle 
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
+import { App } from "@capacitor/app";
 import { AdMob, BannerAdSize, BannerAdPosition } from "@capacitor-community/admob";
 import VideoDownloader from "./VideoDownloader";
 import SubtitleStudio from "./SubtitleStudio";
@@ -147,6 +148,33 @@ export default function PhoneMock({
 
     startupAdMob();
   }, []);
+
+  useEffect(() => {
+    let lastTimeBackPressed = 0;
+
+    const backButtonListener = App.addListener("backButton", () => {
+      if (currentScreen === "home") {
+        const now = Date.now();
+        if (now - lastTimeBackPressed < 2000) {
+          App.exitApp();
+        } else {
+          lastTimeBackPressed = now;
+          onAddNotification(
+            "Burmese Recap Studio",
+            "ထွက်ရန် နောက်တစ်ကြိမ် ထပ်နှိပ်ပါ (Press back again to exit)",
+            "warning"
+          );
+        }
+      } else {
+        // Navigate back to home safely and reset bottom tabs highlights
+        handlePushScreen("home");
+      }
+    });
+
+    return () => {
+      backButtonListener.then((listener) => listener.remove());
+    };
+  }, [currentScreen, lastScreen]);
 
   const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator") => {
     setLastScreen(currentScreen);
@@ -364,20 +392,6 @@ export default function PhoneMock({
           <div className="max-w-5xl mx-auto w-full h-full flex flex-col min-h-0">
           {currentScreen === "home" && (
             <div className="flex-1 flex flex-col min-h-0 h-full">
-              {/* FIXED ENVIRONMENT COMPLIANCE WARNING */}
-              {!Capacitor.isNativePlatform() && (
-                <div className="mx-4 mt-4 bg-amber-500/10 border-2 border-amber-500/20 rounded-2xl p-4 text-left relative overflow-hidden flex gap-3 my-1">
-                  <div className="p-2 bg-amber-500/10 text-amber-550 rounded-xl shrink-0">
-                    <AlertTriangle className="w-4 h-4 text-amber-500 animate-pulse" />
-                  </div>
-                  <div>
-                    <h4 className="text-[11px] font-extrabold text-amber-500 tracking-wide uppercase">AdMob Native Warning</h4>
-                    <p className="text-[10px] text-slate-300 mt-0.5 leading-relaxed font-sans">
-                      AdMob native ads cannot display inside browser previews. A native Android APK/AAB build is required. A live test visual simulator is displayed below.
-                    </p>
-                  </div>
-                </div>
-              )}
 
               {/* Scrolling Dashboard Grid */}
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-48 scrollbar-thin select-none">
@@ -488,21 +502,21 @@ export default function PhoneMock({
                     {/* Subtitle Card */}
                     <div
                       onClick={() => handlePushScreen("subtitle")}
-                      className="bg-[#FFF0F3]/95 border-2 border-white/60 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(16,185,129,0.1)] hover:shadow-[0_18px_32px_rgba(16,185,129,0.3)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
+                      className="bg-slate-900/40 border-2 border-cyan-500/20 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(6,182,212,0.06)] hover:shadow-[0_18px_32px_rgba(6,182,212,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-slate-900/60 active:scale-[0.985] group relative overflow-hidden text-left"
                     >
-                      <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/5 rounded-full blur-xl pointer-events-none" />
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-cyan-500/10 rounded-full blur-xl pointer-events-none" />
                       <div className="flex items-start gap-3">
-                        <div className="p-2 bg-emerald-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-emerald-500/25">
+                        <div className="p-2 bg-cyan-600/20 text-cyan-400 border border-cyan-500/30 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-cyan-500/10">
                           <Sparkles className="w-4 h-4 animate-pulse" />
                         </div>
                         <div className="text-left flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-slate-905 tracking-wide group-hover:text-emerald-700 transition-colors flex items-center justify-between gap-1.5">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-cyan-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
                             <span>AI Subtitle Pro</span>
-                            <span className="text-[7px] bg-[#FFF0F3] text-rose-600 border border-rose-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                              FREE • NO API KEY
+                            <span className="text-[7px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/25 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              FREE • COMPLIANT
                             </span>
                           </h3>
-                          <p className="text-[11px] text-slate-800 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
                             မြန်မာစာလုံးပေါင်း အစီအစဉ်ကို အလိုအလျောက် ညှိပေးမည့်စနစ်။ CapCut အတွက် အဖတ်ရလွယ်ကူပြီး အံကိုက်ဖြစ်စေမည့် .SRT ဖိုင်များကို ထုတ်ပေးသည်။
                           </p>
                         </div>
@@ -512,21 +526,21 @@ export default function PhoneMock({
                     {/* TTS Card */}
                     <div
                       onClick={() => handlePushScreen("tts")}
-                      className="bg-orange-50/95 border-2 border-white/60 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(245,158,11,0.1)] hover:shadow-[0_18px_32px_rgba(245,158,11,0.3)] transition-all duration-300 hover:scale-[1.015] active:scale-[0.985] group relative overflow-hidden text-left"
+                      className="bg-zinc-900/40 border-2 border-orange-500/20 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(245,158,11,0.06)] hover:shadow-[0_18px_32px_rgba(245,158,11,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-zinc-900/60 active:scale-[0.985] group relative overflow-hidden text-left"
                     >
-                      <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/5 rounded-full blur-xl pointer-events-none" />
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-orange-500/10 rounded-full blur-xl pointer-events-none" />
                       <div className="flex items-start gap-3">
-                        <div className="p-2 bg-orange-500 text-white rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-md shadow-orange-500/25">
+                        <div className="p-2 bg-orange-600/20 text-orange-400 border border-orange-500/35 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-orange-500/10">
                           <Volume2 className="w-4 h-4" />
                         </div>
                         <div className="text-left flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-slate-905 tracking-wide group-hover:text-orange-700 transition-colors flex items-center justify-between gap-1.5">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-orange-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
                             <span>Text to Voice</span>
-                            <span className="text-[7px] bg-[#FFF8F0] text-orange-600 border border-orange-200 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                              FREE • PRO FEATURES
+                            <span className="text-[7px] bg-orange-500/20 text-orange-300 border border-orange-500/30 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              FREE • PRO ACCESS
                             </span>
                           </h3>
-                          <p className="text-[11px] text-slate-800 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
                             စာလုံးရေ ၁၀,၀၀0 ကျော်ရှိသော စာမူများကိုပါ အချိန်မရွေး အသံပြောင်းပေးနိုင်မည့်စနစ်။ သဘာဝကျပြီး အဆင့်မြင့် မြန်မာအသံထွက်များ ပါဝင်သည်။
                           </p>
                         </div>
@@ -592,22 +606,6 @@ export default function PhoneMock({
 
       {/* BOTTOM PERSISTENT REGION - Floating elegantly with Safe Area bottom spacing */}
       <div className="absolute bottom-0 left-0 right-0 z-50 pointer-events-none flex flex-col items-center gap-3 px-4 pb-[calc(14px+env(safe-area-inset-bottom))] mb-[env(safe-area-inset-bottom)] select-none">
-        
-        {/* DEDICATED FLOATING BANNER AD SPACE - Floating directly above Bottom Navigation on Home Screen */}
-        {currentScreen === "home" && (
-          <div className="w-full max-w-sm bg-[#0D1321]/95 py-2.5 flex justify-center border border-slate-800/80 rounded-2xl pointer-events-auto shadow-2xl relative overflow-hidden animate-fade-in shrink-0">
-            <div className="w-[320px] h-[50px] bg-[#090D18] border border-amber-500/30 rounded-xl flex items-center justify-between px-3 text-left relative overflow-hidden">
-              <div className="absolute top-0 right-0 text-[6.5px] bg-amber-500 text-[#070B13] font-black uppercase py-0.5 px-2 rounded-bl font-sans">AdMob Test</div>
-              <div>
-                <div className="text-[10px] font-black text-slate-200 tracking-wide font-sans">Google Test Banner (320x50)</div>
-                <div className="text-[8px] text-slate-400 mt-0.5 font-mono">ID: ca-app-pub-3940256099942544/6300978111</div>
-              </div>
-              <div className="text-[9px] bg-emerald-500/10 text-emerald-400 font-mono py-1 px-2 rounded-lg border border-emerald-500/20 font-extrabold uppercase animate-pulse shrink-0">
-                ACTIVE
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* PREMIUM FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR */}
         <div className="w-full max-w-sm bg-[#0D1321]/90 backdrop-blur-lg border border-slate-800/80 rounded-2xl pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.8)] py-3 px-6 flex items-center justify-between shrink-0">
