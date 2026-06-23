@@ -3,7 +3,7 @@ import {
   Volume2, Play, Pause, Download, Settings, Disc, Sparkles, RefreshCw, Layers, CheckCircle 
 } from "lucide-react";
 import { Filesystem, Directory } from "@capacitor/filesystem";
-import { triggerRewardAd } from "../utils/admob";
+import { triggerInterstitialAd } from "../utils/admob";
 import { VoiceOption } from "../types";
 
 export const VOICE_MATRIX: VoiceOption[] = [
@@ -169,7 +169,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
   const handleDownloadMp3 = () => {
     if (!syncedAudioUrl) return;
 
-    triggerRewardAd(
+    triggerInterstitialAd(
       "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး MP3 အခမဲ့ဒေါင်းလုဒ်ဆွဲပါ",
       async () => {
         setIsDownloading(true);
@@ -242,38 +242,38 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
 
   return (
     <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="tts-studio">
-      <div className="p-4 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
+      <div className="p-3 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400">
-              <Volume2 className="w-5 h-5 animate-pulse" />
+          <div className="flex items-center gap-1.5">
+            <div className="p-1 rounded-lg bg-blue-500/10 text-blue-400">
+              <Volume2 className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
-              <p className="text-[10px] text-slate-400">Ultra Long-form Myanmar Voice Engrave</p>
+              <h2 className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
+              <p className="text-[9px] text-slate-400">Ultra Long-form Myanmar Voice Engrave</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-3 pb-24 space-y-3 bg-[#070B13]">
         {/* Voice setup */}
-        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3">
+        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-              <Layers className="w-3.5 h-3.5 text-blue-400" />
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+              <Layers className="w-3 h-3 text-blue-400" />
               Target Speaker Matrix
             </span>
           </div>
 
-          <div className="space-y-3">
-            <div className="space-y-1">
-              <label className="text-[10.5px] text-slate-400 font-medium font-sans">Voice Speaker (အသံရွေးချယ်ရန်)</label>
+          <div className="space-y-2.5">
+            <div className="space-y-0.5">
+              <label className="text-[9.5px] text-slate-400 font-medium font-sans">Voice Speaker (အသံရွေးချယ်ရန်)</label>
               <div className="relative">
                 <select
                   value={selectedVoice}
                   onChange={(e) => setSelectedVoice(e.target.value)}
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
                 >
                   {VOICE_MATRIX.map((v) => (
                     <option key={v.code} value={v.code} className="bg-[#1A2333]">
@@ -281,19 +281,19 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
                     </option>
                   ))}
                 </select>
-                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
-                  <Settings className="w-3.5 h-3.5" />
+                <div className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-slate-400">
+                  <Settings className="w-3 h-3" />
                 </div>
               </div>
             </div>
 
-            <div className="space-y-1">
-              <label className="text-[10.5px] text-slate-400 font-medium font-sans">Voice Style (အသံအနေအထားပုံစံ)</label>
+            <div className="space-y-0.5">
+              <label className="text-[9.5px] text-slate-400 font-medium font-sans">Voice Style (အသံအနေအထားပုံစံ)</label>
               <div className="relative">
                 <select
                   value={selectedStyle}
                   onChange={(e) => setSelectedStyle(e.target.value)}
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-xl py-3 px-3.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
                 >
                   <option value="general" className="bg-[#1A2333]">General (ရိုးရိုး)</option>
                   <option value="chat" className="bg-[#1A2333]">Chat (စကားပြော)</option>
@@ -302,8 +302,8 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
                   <option value="cheerful" className="bg-[#1A2333]">Cheerful (ပျော်ရွှင်သံ)</option>
                   <option value="empathetic" className="bg-[#1A2333]">Empathetic (စာနာသံ)</option>
                 </select>
-                <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none text-slate-400">
-                  <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                <div className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-slate-400">
+                  <Sparkles className="w-3 h-3 text-indigo-400" />
                 </div>
               </div>
             </div>
@@ -311,12 +311,12 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
         </div>
 
         {/* Text Area */}
-        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3">
+        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
               Voice Script (Supports 10,000+ chars)
             </span>
-            <span className="text-[9px] text-slate-400 font-mono">
+            <span className="text-[8px] text-slate-400 font-mono">
               Chars: <b className="text-blue-400">{charCount}</b>
             </span>
           </div>
@@ -326,11 +326,11 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
             onChange={(e) => setText(e.target.value)}
             placeholder="Introduce long script segments here..."
             maxLength={11000}
-            rows={5}
-            className="w-full bg-[#0D1321]/60 border border-[#1E293B] text-xs text-slate-200 rounded-xl p-3 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500"
+            rows={4}
+            className="w-full bg-[#0D1321]/60 border border-[#1E293B] text-xs text-slate-200 rounded-lg p-2.5 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500"
           />
 
-          <div className="flex items-center justify-between text-[9px] text-slate-400 px-0.5">
+          <div className="flex items-center justify-between text-[8.5px] text-slate-400 px-0.5">
             <span>Buffer Parts: <b className="text-slate-300 font-mono">{chunkEstimate} Clause{chunkEstimate > 1 ? "s" : ""}</b></span>
             <span>No HTTP Timeouts</span>
           </div>
@@ -338,54 +338,54 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
           <button
             onClick={handleSynthesizeTts}
             disabled={isSynthesizing || !text.trim()}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs py-3.5 rounded-xl transition-all duration-200 mt-2 flex items-center justify-center gap-2 active:scale-[0.98] shadow-md shadow-blue-950/20"
+            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs py-2.5 rounded-lg transition-all duration-200 mt-1.5 flex items-center justify-center gap-1.5 active:scale-[0.98] shadow-md shadow-blue-950/20"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isSynthesizing ? "animate-spin" : ""}`} />
+            <RefreshCw className={`w-3 h-3 ${isSynthesizing ? "animate-spin" : ""}`} />
             {isSynthesizing ? "Synthesizing vocal wave..." : "Synthesize MP3 Voice"}
           </button>
         </div>
 
         {/* Loading progression logs */}
         {isSynthesizing && (
-          <div className="bg-[#1D283C]/60 border border-blue-500/20 rounded-2xl p-3.5 text-center flex flex-col items-center justify-center space-y-2">
-            <Disc className="w-5 h-5 text-blue-400 animate-spin" />
-            <p className="text-[10px] font-mono text-blue-300">{progressLog}</p>
+          <div className="bg-[#1D283C]/60 border border-blue-500/20 rounded-xl p-3 text-center flex flex-col items-center justify-center space-y-1.5">
+            <Disc className="w-4 h-4 text-blue-400 animate-spin" />
+            <p className="text-[9px] font-mono text-blue-300">{progressLog}</p>
           </div>
         )}
 
         {/* Combined Playback Engine Card */}
         {syncedAudioUrl && (
-          <div className="bg-[#1A2333]/95 border border-emerald-500/20 rounded-2xl p-4 space-y-3 shadow-lg">
+          <div className="bg-[#1A2333]/95 border border-emerald-500/20 rounded-xl p-3 space-y-2.5 shadow-lg">
             <div className="flex items-center justify-between">
-              <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1">
-                <CheckCircle className="w-3 h-3" />
+              <span className="text-[8px] font-bold text-emerald-400 flex items-center gap-0.5">
+                <CheckCircle className="w-2.5 h-2.5" />
                 INTEGRATED MIXER READY
               </span>
-              <span className="text-[8px] font-mono text-slate-500">MPEG Layer-3</span>
+              <span className="text-[7.5px] font-mono text-slate-500">MPEG Layer-3</span>
             </div>
 
             <audio ref={audioRef} src={syncedAudioUrl} className="hidden" />
 
-            <div className="flex items-center gap-3 bg-[#0D1321] rounded-2xl p-3 border border-slate-800">
+            <div className="flex items-center gap-2.5 bg-[#0D1321] rounded-xl p-2.5 border border-slate-800">
               <button
                 onClick={togglePlayback}
-                className="w-9 h-9 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 flex items-center justify-center shrink-0 transition-all duration-200"
+                className="w-8 h-8 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 flex items-center justify-center shrink-0 transition-all duration-200"
               >
-                {audioPlayState ? <Pause className="w-4 h-4 fill-current text-slate-950" /> : <Play className="w-4 h-4 fill-current text-slate-950 ml-0.5" />}
+                {audioPlayState ? <Pause className="w-3.5 h-3.5 fill-current text-slate-950" /> : <Play className="w-3.5 h-3.5 fill-current text-slate-950 ml-0.5" />}
               </button>
 
               <div className="flex-1 flex flex-col justify-center">
-                <p className="text-[10px] text-slate-200 font-semibold truncate">Burmese_Voice_Compiled.mp3</p>
+                <p className="text-[9px] text-slate-200 font-semibold truncate">Burmese_Voice_Compiled.mp3</p>
                 {/* Simulated waveforms visualizer */}
-                <div className="flex items-end gap-[2px] h-3 mt-1.5 select-none">
+                <div className="flex items-end gap-[1.5px] h-2.5 mt-1 select-none">
                   {Array.from({ length: 32 }).map((_, idx) => {
                     const height = audioPlayState 
-                      ? Math.sin(idx + Date.now() * 0.05) * 4 + 7 
-                      : 4;
+                      ? Math.sin(idx + Date.now() * 0.05) * 3 + 5 
+                      : 3;
                     return (
                       <div 
                         key={idx} 
-                        className={`w-[2px] rounded-full transition-all duration-150 ${
+                        className={`w-[1.5px] rounded-full transition-all duration-150 ${
                           audioPlayState ? 'bg-emerald-400' : 'bg-slate-700'
                         }`} 
                         style={{ height: `${height}px` }} 
@@ -399,16 +399,16 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
             <button
               onClick={handleDownloadMp3}
               disabled={isDownloading}
-              className="w-full bg-[#1A2333] hover:bg-slate-800 disabled:bg-slate-800 disabled:opacity-70 border border-[#1E293B] text-slate-200 text-xs py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5"
+              className="w-full bg-[#1A2333] hover:bg-slate-800 disabled:bg-slate-800 disabled:opacity-70 border border-[#1E293B] text-slate-200 text-xs py-2 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5"
             >
               {isDownloading ? (
                 <>
-                  <div className="w-3.5 h-3.5 border-2 border-t-transparent border-slate-300 rounded-full animate-spin" />
+                  <div className="w-3 h-3 border-2 border-t-transparent border-slate-300 rounded-full animate-spin" />
                   <span>Downloading... (ဒေါင်းလုဒ်ဆွဲနေသည်...)</span>
                 </>
               ) : (
                 <>
-                  <Download className="w-3.5 h-3.5" />
+                  <Download className="w-3 h-3" />
                   <span>Download MP3 Track</span>
                 </>
               )}

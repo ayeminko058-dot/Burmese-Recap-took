@@ -390,8 +390,8 @@ export default function PhoneMock({
         {/* SCREEN RENDER LAYER */}
         <div className="flex-1 overflow-hidden">
           <div className="max-w-5xl mx-auto w-full h-full flex flex-col min-h-0">
-          {currentScreen === "home" && (
-            <div className="flex-1 flex flex-col min-h-0 h-full">
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "home" ? "" : "hidden"}`}>
+              <div className="flex-1 flex flex-col min-h-0 h-full">
 
               {/* Scrolling Dashboard Grid */}
               <div className="flex-1 overflow-y-auto p-4 sm:p-6 pb-48 scrollbar-thin select-none">
@@ -552,9 +552,9 @@ export default function PhoneMock({
                 </div>
               </div>
             </div>
-          )}
+            </div>
 
-          {currentScreen === "downloader" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "downloader" ? "" : "hidden"}`}>
             <VideoDownloader 
               onAddNotification={onAddNotification} 
               tasks={tasks}
@@ -562,44 +562,44 @@ export default function PhoneMock({
               onAddDownloadedFile={handleAddDownloadedFile}
               onQuickAccessSettings={() => handlePushScreen("settings")}
             />
-          )}
+            </div>
 
-          {currentScreen === "translator" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "translator" ? "" : "hidden"}`}>
             <Translator
               onAddNotification={onAddNotification}
               onQuickAccessSettings={() => handlePushScreen("settings")}
             />
-          )}
+            </div>
 
-          {currentScreen === "subtitle" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "subtitle" ? "" : "hidden"}`}>
             <SubtitleStudio 
               onAddNotification={onAddNotification}
               onAddDownloadedFile={handleAddDownloadedFile}
             />
-          )}
+            </div>
 
-          {currentScreen === "tts" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "tts" ? "" : "hidden"}`}>
             <TtsStudio 
               onAddNotification={onAddNotification}
               onAddDownloadedFile={handleAddDownloadedFile}
             />
-          )}
+            </div>
 
-          {currentScreen === "downloads" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "downloads" ? "" : "hidden"}`}>
             <DownloadsScreen 
               files={downloadedFiles}
               onDeleteFile={handleDeleteFile}
               onAddNotification={onAddNotification}
             />
-          )}
+            </div>
 
-          {currentScreen === "settings" && (
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "settings" ? "" : "hidden"}`}>
             <SettingsScreen 
               onAddNotification={onAddNotification}
               permissionGranted={permissionGranted}
               onRequestPermission={triggerRequestPermissions}
             />
-          )}
+            </div>
           </div>
         </div>
       </div>

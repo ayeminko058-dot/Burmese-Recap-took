@@ -4,7 +4,7 @@ import {
   Copy, Check, Download, AlertCircle, ShieldCheck, 
   Sparkles, CheckCircle2, Trash2, Key, RefreshCw, Eye, EyeOff, Share2, HelpCircle
 } from "lucide-react";
-import { triggerRewardAd } from "../utils/admob";
+import { triggerInterstitialAd } from "../utils/admob";
 import { DownloadTask } from "../types";
 
 interface VideoDownloaderProps {
@@ -391,8 +391,8 @@ export default function VideoDownloader({
 
       const resultText = data.output || "";
 
-      // Intercept with Reward Ad before displaying results to user
-      triggerRewardAd(
+      // Intercept with Interstitial Ad before displaying results to user
+      triggerInterstitialAd(
         "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာသားအဖြေကို ရယူပါ",
         () => {
           if (formatSelection === "srt") {
