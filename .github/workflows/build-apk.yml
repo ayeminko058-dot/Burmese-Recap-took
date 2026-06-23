@@ -53,10 +53,19 @@ jobs:
         run: |
           npx cap sync android
 
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: |
+          if [ -f "android/gradlew" ]; then
+            echo "Granting execution permissions to gradlew..."
+            chmod +x android/gradlew
+          else
+            echo "gradlew not found!"
+            exit 1
+          fi
+
       - name: Build Debug Android APK
         run: |
           cd android
-          chmod +x gradlew
           ./gradlew assembleDebug
 
       - name: Upload Debug APK Artifact
