@@ -3,6 +3,7 @@ import {
   ShieldAlert, Settings, HardDrive, Cpu, Radio, ShieldCheck, HelpCircle, Bug, Trash2,
   Key, RefreshCw, Eye, EyeOff, Loader2, AlertCircle
 } from "lucide-react";
+import { getApiUrl } from "../utils/api";
 
 interface SettingsScreenProps {
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
@@ -73,7 +74,7 @@ export default function SettingsScreen({
     setValidationError(null);
 
     try {
-      const response = await fetch("/api/validate-key", {
+      const response = await fetch(getApiUrl("/api/validate-key"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

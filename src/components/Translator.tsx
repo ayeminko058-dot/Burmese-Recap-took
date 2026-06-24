@@ -3,6 +3,7 @@ import {
   Languages, ArrowRightLeft, Copy, Check, Trash2, Share2, Sparkles, Loader2, AlertCircle, ShieldCheck
 } from "lucide-react";
 import { triggerInterstitialAd } from "../utils/admob";
+import { getApiUrl } from "../utils/api";
 
 interface TranslatorProps {
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
@@ -64,7 +65,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
         setTranslatedText("");
 
         try {
-          const response = await fetch("/api/translate", {
+          const response = await fetch(getApiUrl("/api/translate"), {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

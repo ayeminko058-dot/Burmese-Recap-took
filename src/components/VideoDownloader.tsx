@@ -5,6 +5,7 @@ import {
   Sparkles, CheckCircle2, Trash2, Key, RefreshCw, Eye, EyeOff, Share2, HelpCircle
 } from "lucide-react";
 import { triggerInterstitialAd } from "../utils/admob";
+import { getApiUrl } from "../utils/api";
 import { DownloadTask } from "../types";
 
 interface VideoDownloaderProps {
@@ -103,7 +104,7 @@ export default function VideoDownloader({
     setValidationError(null);
 
     try {
-      const response = await fetch("/api/validate-key", {
+      const response = await fetch(getApiUrl("/api/validate-key"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -359,7 +360,7 @@ export default function VideoDownloader({
       onAddNotification("Uploading to Gemini", "Transcribing speech on-device through Gemini API...", "info");
 
       // Post payload to Express route proxy
-      const response = await fetch("/api/transcribe", {
+      const response = await fetch(getApiUrl("/api/transcribe"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

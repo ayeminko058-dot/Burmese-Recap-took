@@ -62,9 +62,11 @@ export async function initializeAdMob() {
       console.error("[AdMob] Interstitial failed to load", info);
     });
 
-    // Automatically trigger initial preloads
-    await preloadRewardAd();
-    await preloadInterstitialAd();
+    // Automatically trigger initial preloads with a safe delay to allow device sandbox and webview network threads to settle
+    setTimeout(() => {
+      preloadRewardAd().catch(err => console.warn("[AdMob] Deferred Reward preload failed:", err));
+      preloadInterstitialAd().catch(err => console.warn("[AdMob] Deferred Interstitial preload failed:", err));
+    }, 3000);
   } catch (err) {
     console.warn("[AdMob] MobileAds initialization failed (or running in safe browser fallback):", err);
     isInitializing = false;
