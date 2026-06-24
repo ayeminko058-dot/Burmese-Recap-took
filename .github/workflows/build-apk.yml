@@ -58,6 +58,12 @@ jobs:
         run: |
           npx cap sync android
 
+      - name: Force Fix and Regenerate Gradle Wrapper
+        run: |
+          cd android
+          rm -f gradle/wrapper/gradle-wrapper.jar
+          gradle wrapper --gradle-version 8.7
+
       - name: Grant Execute Permission to Gradle Wrapper
         run: |
           if [ -f "android/gradlew" ]; then
