@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { 
   Home, Download, Settings, Wifi, Battery, Shield, ShieldAlert, Cpu, 
   FolderOpen, Smartphone, Sparkles, Volume2, ArrowLeft, RefreshCw, X, Bell,
-  Mic, FileAudio, FileVideo, AlertTriangle 
+  Mic, FileAudio, FileVideo, AlertTriangle, Trash2, Image
 } from "lucide-react";
 import { Capacitor } from "@capacitor/core";
 import { App } from "@capacitor/app";
@@ -13,6 +13,8 @@ import TtsStudio from "./TtsStudio";
 import DownloadsScreen from "./DownloadsScreen";
 import SettingsScreen from "./SettingsScreen";
 import Translator from "./Translator";
+import TextRemovalStudio from "./TextRemovalStudio";
+import PosterMakerStudio from "./PosterMakerStudio";
 import { DownloadTask, AppNotification } from "../types";
 import { initializeAdMob } from "../utils/admob";
 
@@ -47,9 +49,9 @@ export default function PhoneMock({
   downloadedFiles,
   setDownloadedFiles
 }: PhoneMockProps) {
-  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator"
-  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
-  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
+  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker"
+  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker">("home");
+  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker">("home");
   const [bottomTab, setBottomTab] = useState<"home" | "downloads" | "settings">("home");
   
   // Custom dialog overlay
@@ -176,7 +178,7 @@ export default function PhoneMock({
     };
   }, [currentScreen, lastScreen]);
 
-  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator") => {
+  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker") => {
     setLastScreen(currentScreen);
     setCurrentScreen(screen);
     // Sync bottom active bar indicator
@@ -547,6 +549,54 @@ export default function PhoneMock({
                       </div>
                     </div>
 
+                    {/* AI Text Removal Card */}
+                    <div
+                      onClick={() => handlePushScreen("text_removal")}
+                      className="bg-[#1C1015]/90 border-2 border-rose-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(244,63,94,0.06)] hover:shadow-[0_18px_32px_rgba(244,63,94,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-rose-950/40 active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/10 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-rose-650/20 text-rose-400 border border-rose-500/30 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-rose-500/10">
+                          <Trash2 className="w-4 h-4" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-rose-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
+                            <span>AI Text Removal</span>
+                            <span className="text-[7px] bg-rose-500/20 text-rose-300 border border-rose-500/25 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              GEMINI API
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            စာတန်းထိုးများမှ မလိုအပ်သော အချိန်မှတ်များ၊ ကွင်းစကွင်းပိတ်များနှင့် အပိုစာသားများကို AI ဖြင့် အလိုအလျောက် သန့်စင်ပေးမည့်စနစ်။
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cinematic Poster Maker Card */}
+                    <div
+                      onClick={() => handlePushScreen("poster_maker")}
+                      className="bg-[#0B1A1E]/90 border-2 border-emerald-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(20,184,166,0.06)] hover:shadow-[0_18px_32px_rgba(20,184,166,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-emerald-950/40 active:scale-[0.985] group relative overflow-hidden text-left"
+                    >
+                      <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-emerald-650/20 text-emerald-400 border border-emerald-500/30 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-emerald-500/10">
+                          <Image className="w-4 h-4" />
+                        </div>
+                        <div className="text-left flex-1 min-w-0">
+                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-emerald-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
+                            <span>Cinematic Poster Maker</span>
+                            <span className="text-[7px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/25 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
+                              GEMINI API
+                            </span>
+                          </h3>
+                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
+                            YouTube (16:9) နှင့် TikTok/Shorts (9:16) အတွက် ဆွဲဆောင်မှုရှိသော ရုပ်ရှင်သုံးသပ်ချက် ပိုစတာများနှင့် thumbnail များကို ဖန်တီးပေးမည့်စနစ်။
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
                   </div>
 
                 </div>
@@ -598,6 +648,18 @@ export default function PhoneMock({
               onAddNotification={onAddNotification}
               permissionGranted={permissionGranted}
               onRequestPermission={triggerRequestPermissions}
+            />
+            </div>
+
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "text_removal" ? "" : "hidden"}`}>
+            <TextRemovalStudio 
+              onAddNotification={onAddNotification}
+            />
+            </div>
+
+            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "poster_maker" ? "" : "hidden"}`}>
+            <PosterMakerStudio 
+              onAddNotification={onAddNotification}
             />
             </div>
           </div>

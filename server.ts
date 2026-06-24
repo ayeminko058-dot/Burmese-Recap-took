@@ -165,6 +165,130 @@ Strict instructions:
   }
 });
 
+// API Endpoint: AI Text Removal using Gemini
+app.post("/api/text-removal", async (req, res) => {
+  try {
+    const { text, removeFillers, removeTimestamps, removeBrackets, customPattern } = req.body;
+    if (!text || typeof text !== "string") {
+      res.status(400).json({ error: "Text parameter is required." });
+      return;
+    }
+
+    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
+      return;
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+
+    const prompt = `You are an expert script editor for Burmese movie recaps and video creators. 
+Your job is to clean up and remove undesired text patterns from the provided text while keeping the rest of the spoken narrative, formatting, and language fully intact.
+
+Text-to-Edit:
+"""
+${text}
+"""
+
+Removal directives:
+${removeFillers ? "- Strip out verbal filler words, hesitations, and stuttering sounds (e.g. 'uh', 'um', 'ah', 'အင်း', 'အာ')." : ""}
+${removeTimestamps ? "- Remove all subtitle timestamps, timecodes, and frame ranges (e.g. '00:01:20,300 --> 00:01:24,000' or sequential block numbers)." : ""}
+${removeBrackets ? "- Remove anything contained within brackets, braces, parentheses, sound cue markers, or tags (e.g. '[Music]', '[Background laughter]', '(သရဲသံ)')." : ""}
+${customPattern ? `- Custom removal instruction: Specifically search and remove or clean the following pattern or text: "${customPattern}"` : ""}
+
+Deliver ONLY the final cleaned, edited script or text. Do NOT add any greeting, explanations, introductory remarks, notes, or markdown formatting code blocks (do not wrap in \`\`\` or \`\`\`txt). Keep the original Burmese script completely natural and accurate!`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+    });
+
+    res.json({ cleanedText: response.text || "" });
+  } catch (error: any) {
+    console.error("Gemini text removal failed:", error);
+    res.status(500).json({ error: error.message || "Failed to process text removal using Gemini." });
+  }
+});
+
+// API Endpoint: Cinematic Thumbnail & Poster Maker using Gemini
+app.post("/api/generate-poster", async (req, res) => {
+  try {
+    const { prompt, aspectRatio } = req.body;
+    if (!prompt || typeof prompt !== "string") {
+      res.status(400).json({ error: "Prompt is required and must be a string." });
+      return;
+    }
+
+    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
+      return;
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+
+    // Optimize the prompt for cinematic high-contrast dramatic poster/thumbnail art
+    const optimizePrompt = `You are an expert movie poster and cinematic thumbnail designer. Translate (if needed) and enrich the following description into a highly detailed, professional, high-contrast, atmospheric image generation prompt in English. It must have dramatic, photorealistic qualities, cinematic 8k lighting, high-contrast values, neon tints or deep shadows, and cinematic framing. Do not request text overlays inside the image itself, just describe the scene.
+    
+    Description: "${prompt}"
+    
+    Output ONLY the final English prompt. No introductions, explanations, or quotes.`;
+
+    const optimizationRes = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: optimizePrompt,
+    });
+
+    const optimizedPrompt = (optimizationRes.text || prompt).trim();
+
+    // Generate the image using gemini-2.5-flash-image
+    const imageRes = await ai.models.generateContent({
+      model: "gemini-2.5-flash-image",
+      contents: {
+        parts: [{ text: optimizedPrompt }]
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: aspectRatio === "16:9" ? "16:9" : "9:16"
+        }
+      }
+    });
+
+    let imageUrl = "";
+    if (imageRes.candidates?.[0]?.content?.parts) {
+      for (const part of imageRes.candidates[0].content.parts) {
+        if (part.inlineData) {
+          imageUrl = `data:image/png;base64,${part.inlineData.data}`;
+          break;
+        }
+      }
+    }
+
+    if (!imageUrl) {
+      throw new Error("No image data returned from the Gemini Image model.");
+    }
+
+    res.json({ imageUrl, optimizedPrompt });
+  } catch (error: any) {
+    console.error("Poster generation failed:", error);
+    res.status(500).json({ error: error.message || "Failed to generate cinematic poster." });
+  }
+});
+
 // API Endpoint 1: Ultra Long-Form Edge TTS Aggregation Pipeline
 app.post("/api/tts", async (req, res) => {
   try {

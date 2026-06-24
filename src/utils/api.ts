@@ -12,9 +12,7 @@ export function getApiUrl(endpoint: string): string {
     return cleanEndpoint;
   }
 
-  // Retrieve the injected app URL or default to the verified Cloud Run deployed URL
-  const baseAppUrl = ((import.meta as any).env?.VITE_APP_URL || "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app").trim();
-  const cleanBase = baseAppUrl.endsWith("/") ? baseAppUrl.slice(0, -1) : baseAppUrl;
-
-  return `${cleanBase}${cleanEndpoint}`;
+  // Hardcoded production Vercel deployment URL fallback
+  const defaultFallback = "https://burmese-recap-tool.vercel.app";
+  return `${defaultFallback}${cleanEndpoint}`;
 }
