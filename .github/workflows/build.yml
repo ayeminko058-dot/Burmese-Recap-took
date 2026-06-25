@@ -37,11 +37,13 @@ jobs:
       - name: Compile Application
         run: npm run build
 
-      - name: Upload Artifacts
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: production-app-package
           path: |
+            .next/
             dist/
+            build/
             models/ggml-tiny.bin
 
