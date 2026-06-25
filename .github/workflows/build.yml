@@ -29,10 +29,12 @@ jobs:
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Download Whisper Model
+      - name: Download Whisper Model for Subtitle Aligner Module
         run: |
-          mkdir -p models
-          curl -L -o models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+          # Isolate model downloading specifically for Subtitle Aligner Forced Alignment Engine
+          wget -q https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
+          mkdir -p assets/models
+          cp ggml-tiny.bin assets/models/
 
       - name: Compile Application
         run: npm run build
@@ -45,5 +47,6 @@ jobs:
             .next/
             dist/
             build/
-            models/ggml-tiny.bin
+            assets/models/ggml-tiny.bin
+            dist/assets/models/ggml-tiny.bin
 

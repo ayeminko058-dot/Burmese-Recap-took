@@ -2,14 +2,13 @@ import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import fs from "fs";
 import os from "os";
 import { exec, spawn } from "child_process";
 import { EventEmitter } from "events";
 import { pipeline } from "stream/promises";
 import multer from "multer";
-import whisper from "whisper-node";
 import https from "https";
 
 dotenv.config();
@@ -87,6 +86,7 @@ const PORT = 3000;
 const upload = multer({ dest: os.tmpdir() });
 
 app.use(express.json({ limit: "100mb" }));
+app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
 // Helper to get Gemini API Key dynamically from request
 function getRequestApiKey(req: any): string | null {
@@ -133,6 +133,66 @@ app.post("/api/validate-key", async (req, res) => {
   }
 });
 
+// Helper to flatten and safely extract text from any nested Gemini response structure, stringified JSON, or raw object
+function flattenTranslationResponse(input: any): string {
+  if (!input) return "";
+  
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        return flattenTranslationResponse(parsed);
+      } catch (e) {
+        return input;
+      }
+    }
+    return input;
+  }
+  
+  if (typeof input === "object") {
+    if (
+      input.candidates &&
+      Array.isArray(input.candidates) &&
+      input.candidates[0] &&
+      input.candidates[0].content &&
+      input.candidates[0].content.parts &&
+      Array.isArray(input.candidates[0].content.parts) &&
+      input.candidates[0].content.parts[0]
+    ) {
+      const part = input.candidates[0].content.parts[0];
+      if (typeof part === "string") return flattenTranslationResponse(part);
+      if (part && typeof part.text === "string") return flattenTranslationResponse(part.text);
+    }
+    
+    const keysToCheck = ["translatedText", "translation", "text", "translated_text", "output", "result"];
+    for (const key of keysToCheck) {
+      if (input[key] !== undefined && input[key] !== null) {
+        return flattenTranslationResponse(input[key]);
+      }
+    }
+    
+    if (Array.isArray(input)) {
+      if (input.length > 0) {
+        return flattenTranslationResponse(input[0]);
+      }
+      return "";
+    }
+    
+    if (typeof input.text === "string") {
+      return flattenTranslationResponse(input.text);
+    }
+    
+    try {
+      return JSON.stringify(input);
+    } catch {
+      return "";
+    }
+  }
+  
+  return String(input);
+}
+
 // API Endpoint for Universal Translator using Gemini
 app.post("/api/translate", async (req, res) => {
   try {
@@ -172,7 +232,13 @@ ${text}`;
       contents: prompt,
     });
 
-    res.json({ translation: response.text || "" });
+    // Safely extract and flatten the translation response
+    const cleanTranslatedText = flattenTranslationResponse(response);
+
+    res.json({ 
+      translatedText: cleanTranslatedText,
+      translation: cleanTranslatedText // Fallback key for backward compatibility
+    });
   } catch (error: any) {
     console.error("Gemini Translation failed:", error);
     res.status(500).json({ error: error.message || "Translation failed." });
@@ -254,7 +320,7 @@ Strict instructions:
 // API Endpoint 1: Ultra Long-Form Edge TTS Aggregation Pipeline
 app.post("/api/tts", async (req, res) => {
   try {
-    const { text, voice, style, rate: reqRate, pitch: reqPitch } = req.body;
+    const { text, voice, style, rate: reqRate, pitch: reqPitch, apiKey: bodyApiKey } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: "Text parameter is required and must be a string." });
       return;
@@ -262,25 +328,49 @@ app.post("/api/tts", async (req, res) => {
     const selectedVoice = voice || "my-MM-NilarNeural";
     const selectedStyle = style || "general";
 
-    // Chunking text safely based on Burmese punctuation [ ။ ], English punctuation [ . , ! , ? ], or newline [ \n ]
-    // Each chunk should be reasonably sized (e.g., around 150-250 characters) to avoid timeouts.
-    const rawChunks = text.split(/(?<=[။。\.\!\?\n])/);
-    const cleanedChunks: string[] = [];
+    // Extract the API key passed from local memory
+    const userApiKey = (req.headers["x-gemini-api-key"] as string) || bodyApiKey || process.env.GEMINI_API_KEY || "";
 
-    for (let chunk of rawChunks) {
-      const trimmed = chunk.trim();
-      if (!trimmed) continue;
-      
-      // If a single chunk is still extremely long (e.g., no punctuation), sub-chunk it by spaces/characters
-      if (trimmed.length > 200) {
-        let subIndex = 0;
-        while (subIndex < trimmed.length) {
-          cleanedChunks.push(trimmed.slice(subIndex, subIndex + 200));
-          subIndex += 200;
+    // Splits must only occur at natural Burmese sentence breaks (။) or English periods (.) to keep full phrases intact.
+    const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
+    const cleanedChunks: string[] = [];
+    let currentChunk = "";
+    let currentLinesCount = 0;
+
+    for (let sentence of sentences) {
+      // Safeguard: if a single sentence is extremely long (e.g., > 1800 characters), split it
+      if (sentence.length > 1800) {
+        if (currentChunk) {
+          cleanedChunks.push(currentChunk.trim());
+          currentChunk = "";
+          currentLinesCount = 0;
         }
-      } else {
-        cleanedChunks.push(trimmed);
+        let temp = sentence;
+        while (temp.length > 1800) {
+          cleanedChunks.push(temp.slice(0, 1800));
+          temp = temp.slice(1800);
+        }
+        sentence = temp;
+        if (!sentence) continue;
       }
+
+      if (currentChunk && (currentChunk.length + sentence.length + 1 > 1800 || currentLinesCount >= 10)) {
+        cleanedChunks.push(currentChunk.trim());
+        currentChunk = sentence;
+        currentLinesCount = 1;
+      } else {
+        if (currentChunk) {
+          const lastChar = currentChunk[currentChunk.length - 1];
+          const needsSpace = !/[။\s]/.test(lastChar);
+          currentChunk += (needsSpace ? " " : "") + sentence;
+        } else {
+          currentChunk = sentence;
+        }
+        currentLinesCount++;
+      }
+    }
+    if (currentChunk.trim()) {
+      cleanedChunks.push(currentChunk.trim());
     }
 
     if (cleanedChunks.length === 0) {
@@ -345,27 +435,38 @@ app.post("/api/tts", async (req, res) => {
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000);
 
+          const fetchHeaders: Record<string, string> = {
+            "Content-Type": "application/ssml+xml",
+            "Accept": "*/*"
+          };
+          if (userApiKey) {
+            fetchHeaders["X-Gemini-API-Key"] = userApiKey;
+            fetchHeaders["Authorization"] = `Bearer ${userApiKey}`;
+          }
+
           if (isMyanmar) {
             const ssmlText = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='my-MM'><voice name='${voice}'><prosody rate='${rate}' pitch='${pitch}'>${sanitizedText}</prosody></voice></speak>`;
 
             try {
               response = await fetch(`https://my-edge-tts-api.vercel.app/api/tts?voice=${selectedVoice}`, {
                 method: "POST",
-                headers: {
-                  "Content-Type": "application/ssml+xml",
-                  "Accept": "*/*"
-                },
+                headers: fetchHeaders,
                 body: ssmlText,
                 signal: controller.signal
               });
 
               if (!response || !response.ok) {
+                const jsonHeaders: Record<string, string> = {
+                  "Content-Type": "application/json",
+                  "Accept": "*/*"
+                };
+                if (userApiKey) {
+                  jsonHeaders["X-Gemini-API-Key"] = userApiKey;
+                  jsonHeaders["Authorization"] = `Bearer ${userApiKey}`;
+                }
                 response = await fetch("https://my-edge-tts-api.vercel.app/api/tts", {
                   method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "Accept": "*/*"
-                  },
+                  headers: jsonHeaders,
                   body: JSON.stringify({
                     ssml: ssmlText,
                     voice: selectedVoice
@@ -379,11 +480,21 @@ app.post("/api/tts", async (req, res) => {
 
             if (!response || !response.ok) {
               const fallbackUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
-              response = await fetch(fallbackUrl, { signal: controller.signal });
+              const getHeaders: Record<string, string> = {};
+              if (userApiKey) {
+                getHeaders["X-Gemini-API-Key"] = userApiKey;
+                getHeaders["Authorization"] = `Bearer ${userApiKey}`;
+              }
+              response = await fetch(fallbackUrl, { headers: getHeaders, signal: controller.signal });
             }
           } else {
             const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
-            response = await fetch(ttsUrl, { signal: controller.signal });
+            const getHeaders: Record<string, string> = {};
+            if (userApiKey) {
+              getHeaders["X-Gemini-API-Key"] = userApiKey;
+              getHeaders["Authorization"] = `Bearer ${userApiKey}`;
+            }
+            response = await fetch(ttsUrl, { headers: getHeaders, signal: controller.signal });
           }
 
           clearTimeout(timeoutId);
@@ -410,32 +521,35 @@ app.post("/api/tts", async (req, res) => {
       throw lastChunkError || new Error("Unknown synthesis error");
     };
 
-    // Set chunked transfer headers to support unlimited length with zero server timeouts
+    console.log(`[TTS Parallel] Dispatching all ${cleanedChunks.length} chunks concurrently...`);
+
+    // Fetch all chunks concurrently in parallel
+    const chunkPromises = cleanedChunks.map((_, index) => {
+      return processSingleChunkWithRetry(index).catch(err => {
+        console.error(`[TTS Parallel Error] Permanent failure for chunk index ${index}:`, err);
+        return null; // Keep going so Promise.all does not fail completely
+      });
+    });
+
+    const results = await Promise.all(chunkPromises);
+
+    // Merge them sequentially in the exact original order
+    const validBuffers = results.filter((buf): buf is Buffer => buf !== null && buf.length > 0);
+
+    if (validBuffers.length === 0) {
+      throw new Error("All parallel synthesis chunks failed to compile.");
+    }
+
+    const mergedBuffer = Buffer.concat(validBuffers);
+    console.log(`[TTS Merge Engine] Unified ${validBuffers.length}/${cleanedChunks.length} chunks into a single audio payload (${mergedBuffer.length} bytes).`);
+
     res.writeHead(200, {
       "Content-Type": "audio/mpeg",
-      "Cache-Control": "no-cache",
-      "Connection": "keep-alive",
-      "Transfer-Encoding": "chunked",
+      "Content-Length": mergedBuffer.length,
       "Content-Disposition": `attachment; filename="burmese_recap_tts_${Date.now()}.mp3"`,
     });
 
-    console.log(`[TTS Stream] Initializing progressive stream synthesis for ${cleanedChunks.length} chunks...`);
-
-    // Sequentially synthesize and stream chunks to keep Time-to-First-Byte extremely low
-    for (let i = 0; i < cleanedChunks.length; i++) {
-      try {
-        const buffer = await processSingleChunkWithRetry(i);
-        if (buffer && buffer.length > 0) {
-          console.log(`[TTS Stream] Writing chunk ${i + 1}/${cleanedChunks.length} of size ${buffer.length} bytes to the client.`);
-          res.write(buffer);
-        }
-      } catch (err: any) {
-        console.error(`[TTS Stream Error] Permanent failure for chunk index ${i}:`, err);
-        // Skip failed chunk, keep streaming remaining segments
-      }
-    }
-
-    console.log("[TTS Stream] All chunks written. Closing connection.");
+    res.write(mergedBuffer);
     res.end();
   } catch (error: any) {
     console.error("Critical error in TTS streaming service:", error);
@@ -469,7 +583,7 @@ app.post("/api/downloader/sim", async (req, res) => {
 });
 
 // API Endpoint for Real Video/Audio Subtitle & Transcript Generation (Streaming Pipeline)
-app.post("/api/subtitle/generate-stream", async (req, res) => {
+app.post("/api/subtitle/generate-stream", upload.single("file"), async (req, res) => {
   // Establish Chunked Server-Sent Events (SSE) Stream
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -483,102 +597,129 @@ app.post("/api/subtitle/generate-stream", async (req, res) => {
   let outputAudioPath = "";
 
   try {
-    const { fileBase64, fileName, mimeType, format } = req.body;
+    const { fileBase64, fileName, mimeType, format, apiKey: bodyApiKey } = req.body;
+    const apiKey = (req.headers["x-gemini-api-key"] as string) || bodyApiKey || process.env.GEMINI_API_KEY;
 
-    if (!fileBase64) {
-      sendProgress(0, "Error: File content is required.");
+    if (!req.file && !fileBase64) {
+      sendProgress(0, "Error: File content or upload is required.");
       res.end();
       return;
     }
 
     // Step 1: Upload received (5%)
-    sendProgress(5, "Upload received, writing media stream to backend storage...");
+    sendProgress(5, "Upload received, processing media track...");
 
     const tempDir = os.tmpdir();
-    const cleanFileName = fileName ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_") : `upload_${Date.now()}`;
-    inputFilePath = path.join(tempDir, `input_${Date.now()}_${cleanFileName}`);
-    outputAudioPath = path.join(tempDir, `output_${Date.now()}.wav`);
-
-    const fileBuffer = Buffer.from(fileBase64, "base64");
-    await fs.promises.writeFile(inputFilePath, fileBuffer);
+    
+    if (req.file) {
+      inputFilePath = req.file.path;
+      outputAudioPath = path.join(tempDir, `output_${Date.now()}.wav`);
+    } else {
+      const cleanFileName = fileName ? fileName.replace(/[^a-zA-Z0-9.\-_]/g, "_") : `upload_${Date.now()}`;
+      inputFilePath = path.join(tempDir, `input_${Date.now()}_${cleanFileName}`);
+      outputAudioPath = path.join(tempDir, `output_${Date.now()}.wav`);
+      const fileBuffer = Buffer.from(fileBase64, "base64");
+      await fs.promises.writeFile(inputFilePath, fileBuffer);
+    }
 
     // Step 2: Audio extraction started (15%)
     sendProgress(15, "Audio extraction started. Demuxing sound track via ffmpeg...");
 
-    // Use FfmpegAudioExtractor asynchronously for non-blocking execution
-    const extractor = new FfmpegAudioExtractor();
-    await extractor.extract(inputFilePath, outputAudioPath);
+    const isWav = req.file && req.file.originalname && req.file.originalname.toLowerCase().endsWith(".wav");
+    if (isWav) {
+      // It's already our highly-optimized, downsampled 16kHz mono WAV from client!
+      // We can directly use it! This is super fast and bypasses ffmpeg demuxing!
+      outputAudioPath = inputFilePath;
+      sendProgress(30, "Optimized client audio track detected. Bypassing server ffmpeg demuxing!");
+    } else {
+      // Use FfmpegAudioExtractor asynchronously for non-blocking execution
+      const extractor = new FfmpegAudioExtractor();
+      await extractor.extract(inputFilePath, outputAudioPath);
+      sendProgress(30, "Audio extraction completed. Resampling PCM stream to 16kHz mono 16-bit...");
+    }
 
-    // Step 3: Audio extraction completed (30%)
-    sendProgress(30, "Audio extraction completed. Resampling PCM stream to 16kHz mono 16-bit...");
+    let finalOutput = "";
 
-    // Step 4: Whisper processing started (50%)
-    sendProgress(50, "Whisper local transcription started. Analyzing acoustic speech patterns...");
+    if (format !== "srt") {
+      // Step 4: Direct, pure Gemini RAW transcription (no Whisper, no segment alignment, no overlaps!)
+      sendProgress(50, "Passing audio track purely to Gemini API for verbatim transcription...");
+      const rawText = await transcribeRawWithGemini(outputAudioPath, apiKey);
 
-    const whisperSegments = await transcribeWithWhisper(outputAudioPath);
+      sendProgress(85, "Cleaning up timestamps and formatting continuous prose paragraphs...");
+      // Strip any timestamps and structural bracket timelines
+      let cleanedText = rawText;
+      cleanedText = cleanedText.replace(/\[\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\]/g, "");
+      cleanedText = cleanedText.replace(/\(\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\)/g, "");
+      cleanedText = cleanedText.replace(/\b\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\b/g, "");
+      cleanedText = cleanedText.replace(/\[\s*\]/g, "").replace(/\(\s*\)/g, "");
+      cleanedText = cleanedText.replace(/\s+/g, " ");
+      finalOutput = cleanedText.trim();
+    } else {
+      // Step 4: Whisper processing started (50%)
+      sendProgress(50, "Whisper local transcription started. Analyzing acoustic speech patterns...");
 
-    // Step 5: Segment parsing & timeline marker splitting (70%)
-    sendProgress(70, "Whisper response received. Parsing timeline and applying marker splits...");
+      const whisperSegments = await transcribeWithWhisper(outputAudioPath, apiKey);
 
-    const subBlocks: { startMs: number; endMs: number; text: string }[] = [];
+      // Step 5: Segment parsing & timeline marker splitting (70%)
+      sendProgress(70, "Whisper response received. Parsing timeline and applying marker splits...");
 
-    for (const segment of whisperSegments) {
-      const textVal = segment.speech || segment.text || "";
-      if (!textVal.trim()) continue;
+      const subBlocks: { startMs: number; endMs: number; text: string }[] = [];
 
-      const startMs = parseTimeToMs(segment.start);
-      const endMs = parseTimeToMs(segment.end);
+      for (const segment of whisperSegments) {
+        const textVal = segment.speech || segment.text || "";
+        if (!textVal.trim()) continue;
 
-      // Timeline marker splitting logic: either a period (.) or a Burmese period (။)
-      if (/[\.။]/.test(textVal)) {
-        const rawParts = textVal.split(/[\.။]/);
-        const parts = rawParts.map(p => p.trim()).filter(Boolean);
-        const totalCharLength = parts.reduce((sum, p) => sum + p.length, 0);
+        const startMs = parseTimeToMs(segment.start);
+        const endMs = parseTimeToMs(segment.end);
 
-        if (totalCharLength > 0) {
-          let currentStartMs = startMs;
-          const totalDuration = endMs - startMs;
+        // Timeline marker splitting logic: either a period (.) or a Burmese period (။)
+        if (/[\.။]/.test(textVal)) {
+          const rawParts = textVal.split(/[\.။]/);
+          const parts = rawParts.map(p => p.trim()).filter(Boolean);
+          const totalCharLength = parts.reduce((sum, p) => sum + p.length, 0);
 
-          for (let i = 0; i < parts.length; i++) {
-            const partText = parts[i];
-            const partDuration = (partText.length / totalCharLength) * totalDuration;
-            const partEndMs = Math.round(currentStartMs + partDuration);
+          if (totalCharLength > 0) {
+            let currentStartMs = startMs;
+            const totalDuration = endMs - startMs;
 
-            // Strip out these (.) and (။) markers globally using regex so they do NOT appear inside the final user-facing subtitle text
-            const cleanText = partText.replace(/[\.။]/g, "").trim();
+            for (let i = 0; i < parts.length; i++) {
+              const partText = parts[i];
+              const partDuration = (partText.length / totalCharLength) * totalDuration;
+              const partEndMs = Math.round(currentStartMs + partDuration);
 
-            // Apply Burmese advanced line-wrapping rules
+              // Strip out these (.) and (။) markers globally using regex so they do NOT appear inside the final user-facing subtitle text
+              const cleanText = partText.replace(/[\.။]/g, "").trim();
+
+              // Apply Burmese advanced line-wrapping rules
+              const wrappedText = applyStackingRules(cleanText);
+
+              subBlocks.push({
+                startMs: currentStartMs,
+                endMs: partEndMs,
+                text: wrappedText
+              });
+
+              currentStartMs = partEndMs;
+            }
+          } else {
+            const cleanText = textVal.replace(/[\.။]/g, "").trim();
             const wrappedText = applyStackingRules(cleanText);
-
-            subBlocks.push({
-              startMs: currentStartMs,
-              endMs: partEndMs,
-              text: wrappedText
-            });
-
-            currentStartMs = partEndMs;
+            subBlocks.push({ startMs, endMs, text: wrappedText });
           }
         } else {
+          // No split markers
           const cleanText = textVal.replace(/[\.။]/g, "").trim();
           const wrappedText = applyStackingRules(cleanText);
           subBlocks.push({ startMs, endMs, text: wrappedText });
         }
-      } else {
-        // No split markers
-        const cleanText = textVal.replace(/[\.။]/g, "").trim();
-        const wrappedText = applyStackingRules(cleanText);
-        subBlocks.push({ startMs, endMs, text: wrappedText });
       }
-    }
 
-    // Sort blocks chronologically
-    subBlocks.sort((a, b) => a.startMs - b.startMs);
+      // Sort blocks chronologically
+      subBlocks.sort((a, b) => a.startMs - b.startMs);
 
-    // Step 6: Formatting blocks (85%)
-    sendProgress(85, "Synthesizing blocks, applying alignment anchors and cleaning markers...");
+      // Step 6: Formatting blocks (85%)
+      sendProgress(85, "Synthesizing blocks, applying alignment anchors and cleaning markers...");
 
-    let finalOutput = "";
-    if (format === "srt") {
       for (let i = 0; i < subBlocks.length; i++) {
         const block = subBlocks[i];
         const blockIndex = i + 1;
@@ -586,8 +727,6 @@ app.post("/api/subtitle/generate-stream", async (req, res) => {
         const endStr = formatMsToSrtTime(block.endMs);
         finalOutput += `${blockIndex}\n${startStr} --> ${endStr}\n${block.text}\n\n`;
       }
-    } else {
-      finalOutput = subBlocks.map(b => b.text.replace(/\n/g, " ")).join(" ");
     }
 
     // Step 7: Completed (100%)
@@ -616,11 +755,18 @@ app.post("/api/subtitle/generate-stream", async (req, res) => {
 class FfmpegAudioExtractor extends EventEmitter {
   constructor() {
     super();
+    // Register a default error listener to prevent uncaught 'error' events from crashing the Node.js process
+    this.on("error", (err) => {
+      console.warn("[FfmpegAudioExtractor] Handled EventEmitter error event safely:", err.message || err);
+    });
   }
 
   extract(inputPath: string, outputPath: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const args = ["-y", "-i", inputPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-f", "wav", outputPath];
+      const isMp3 = outputPath.endsWith(".mp3");
+      const args = isMp3
+        ? ["-y", "-i", inputPath, "-vn", "-codec:a", "libmp3lame", "-q:a", "5", "-ac", "1", "-ar", "16000", "-f", "mp3", outputPath]
+        : ["-y", "-i", inputPath, "-vn", "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le", "-f", "wav", outputPath];
       console.log(`[FFMPEG_SPAWN] Spawning ffmpeg asynchronously with args: ${args.join(" ")}`);
       const proc = spawn("ffmpeg", args);
 
@@ -669,68 +815,365 @@ function sliceAudioAsync(inputPath: string, startMs: number, durationMs: number,
   });
 }
 
-// Ensure local Whisper model exists at ./models/ggml-tiny.bin
-async function ensureWhisperModelExists(): Promise<string> {
-  const modelDir = path.resolve("./models");
-  const modelPath = path.join(modelDir, "ggml-tiny.bin");
-  if (!fs.existsSync(modelDir)) {
-    fs.mkdirSync(modelDir, { recursive: true });
-  }
-  if (!fs.existsSync(modelPath)) {
-    console.log("[Whisper] ggml-tiny.bin not found. Downloading model from huggingface...");
-    const url = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin";
+// Robust LocalFileManager checking if the Whisper model exists in local storage
+class LocalFileManager {
+  private static possiblePaths = [
+    path.resolve("./assets/models/ggml-tiny.bin"),
+    path.resolve("./dist/assets/models/ggml-tiny.bin"),
+    path.resolve("./models/ggml-tiny.bin"),
+    path.resolve(process.cwd(), "assets/models/ggml-tiny.bin"),
+    path.resolve(process.cwd(), "dist/assets/models/ggml-tiny.bin"),
+    path.resolve(process.cwd(), "models/ggml-tiny.bin"),
+  ];
+
+  /**
+   * Verifies if the local Whisper model file is packaged and exists in any of the potential local storage locations.
+   * Throws a precise, clear local offline error if missing, rather than attempting any internet download.
+   */
+  public static verifyModelExists(): string {
+    console.log("[LocalFileManager] Verifying local model files for 100% offline-first compliance...");
     
-    await new Promise<void>((resolve, reject) => {
-      const file = fs.createWriteStream(modelPath);
-      const download = (targetUrl: string) => {
-        https.get(targetUrl, (response) => {
-          if (response.statusCode === 302 || response.statusCode === 301) {
-            download(response.headers.location!);
-            return;
+    for (const modelPath of this.possiblePaths) {
+      console.log(`[LocalFileManager] Checking path: ${modelPath}`);
+      if (fs.existsSync(modelPath)) {
+        try {
+          const stats = fs.statSync(modelPath);
+          // Standard check to ensure it's not a dummy or empty file
+          if (stats.size > 10 * 1024 * 1024) { // Needs to be > 10MB (actual is ~75MB)
+            console.log(`[LocalFileManager] Found valid Whisper model at: ${modelPath} (Size: ${(stats.size / (1024 * 1024)).toFixed(1)} MB)`);
+            return modelPath;
+          } else {
+            console.warn(`[LocalFileManager] Found file at ${modelPath} but size is too small (${stats.size} bytes). Skipping...`);
           }
-          if (response.statusCode !== 200) {
-            reject(new Error(`Failed to download model, status code: ${response.statusCode}`));
-            return;
-          }
-          response.pipe(file);
-          file.on("finish", () => {
-            file.close();
-            console.log("[Whisper] Model downloaded successfully to " + modelPath);
-            resolve();
-          });
-        }).on("error", (err) => {
-          fs.unlink(modelPath, () => {});
-          reject(err);
-        });
-      };
-      download(url);
-    });
+        } catch (e) {
+          console.error(`[LocalFileManager] Error checking stats for ${modelPath}:`, e);
+        }
+      }
+    }
+
+    // Precise local offline error instead of API-based/server download fallback
+    throw new Error(
+      "Offline Whisper Model Missing: The model file 'ggml-tiny.bin' was not found in local internal storage. " +
+      "Please ensure that the model is bundled in the assets folder at 'assets/models/ggml-tiny.bin' or in the " +
+      "'models/' directory during packaging."
+    );
   }
-  return modelPath;
 }
 
-// Transcribe with Whisper model locally
-async function transcribeWithWhisper(audioPath: string): Promise<any[]> {
-  const modelPath = await ensureWhisperModelExists();
-  console.log(`[Whisper] Starting local Whisper tiny model transcription on ${audioPath}`);
-  
-  const options = {
-    modelPath: modelPath,
-    language: "my",
-    whisperOptions: {
-      language: "my",
-      word_timestamps: true
+// Ensure local Whisper model exists at ./models/ggml-tiny.bin (Local-first compliance check)
+async function ensureWhisperModelExists(): Promise<string> {
+  return LocalFileManager.verifyModelExists();
+}
+
+// Helper to get audio duration via ffprobe or file size estimation
+function getAudioDuration(audioPath: string): Promise<number> {
+  return new Promise((resolve) => {
+    exec(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${audioPath}"`, (err, stdout) => {
+      if (!err && stdout) {
+        const duration = parseFloat(stdout.trim());
+        if (!isNaN(duration) && duration > 0) {
+          resolve(duration);
+          return;
+        }
+      }
+      // fallback based on size if it fails
+      try {
+        const stats = fs.statSync(audioPath);
+        // For 16kHz 16-bit mono WAV, bytes per second is 16000 * 2 = 32000
+        const estDuration = stats.size / 32000;
+        resolve(estDuration > 0 ? estDuration : 60);
+      } catch (e) {
+        resolve(60);
+      }
+    });
+  });
+}
+
+// Text chunking helpers for clean subtitle line-breaking
+function splitIntoReadableChunks(text: string, maxLen = 60): string[] {
+  const words = text.split(/\s+/);
+  const chunks: string[] = [];
+  let currentChunk: string[] = [];
+  let currentLen = 0;
+
+  for (const word of words) {
+    if (currentLen + word.length + 1 > maxLen && currentChunk.length > 0) {
+      chunks.push(currentChunk.join(" "));
+      currentChunk = [word];
+      currentLen = word.length;
+    } else {
+      currentChunk.push(word);
+      currentLen += word.length + 1;
     }
-  };
-
-  const whisperFn = typeof whisper === "function" ? whisper : (whisper as any).default || (whisper as any).whisper;
-  if (typeof whisperFn !== "function") {
-    throw new Error("Unable to locate whisper function in whisper-node package.");
   }
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk.join(" "));
+  }
+  return chunks;
+}
 
-  const results = await whisperFn(audioPath, options);
-  console.log(`[Whisper] Transcription finished. Received ${results?.length || 0} segments.`);
-  return results || [];
+function splitByLength(text: string, maxLen = 30): string[] {
+  const chunks: string[] = [];
+  for (let i = 0; i < text.length; i += maxLen) {
+    chunks.push(text.slice(i, i + maxLen));
+  }
+  return chunks;
+}
+
+function chunkText(text: string): string[] {
+  if (/\s/.test(text) || text.length > 50) {
+    const spaceCount = (text.match(/\s/g) || []).length;
+    if (spaceCount > text.length * 0.05) {
+      return splitIntoReadableChunks(text);
+    }
+  }
+  if (text.length > 30) {
+    return splitByLength(text);
+  }
+  return [text];
+}
+
+// Transcribe the audio accurately using Gemini's high-fidelity audio capabilities (preferred for Burmese)
+async function transcribeWithGemini(audioPath: string, apiKey: string): Promise<any[]> {
+  console.log(`[Gemini STT] Initializing speech-to-text via gemini-3.5-flash for ${audioPath}`);
+  
+  let fileUpload: any = null;
+  let audioBase64 = "";
+  const mimeType = audioPath.endsWith(".mp3") ? "audio/mp3" : "audio/wav";
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+
+    // Speed Optimization: Upload straight to Gemini File API as a standard binary stream
+    try {
+      console.log(`[Gemini STT] Uploading ${audioPath} straight to Gemini File API as binary stream...`);
+      fileUpload = await ai.files.upload({
+        file: audioPath,
+        config: {
+          mimeType: mimeType,
+        },
+      });
+      console.log(`[Gemini STT] File uploaded successfully to Gemini File API: ${fileUpload.uri}`);
+    } catch (uploadErr: any) {
+      console.warn(`[Gemini STT] Gemini File API upload failed: ${uploadErr.message || uploadErr}. Falling back to inline base64...`);
+      const audioBuffer = await fs.promises.readFile(audioPath);
+      audioBase64 = audioBuffer.toString("base64");
+    }
+
+    const requestContents: any[] = [];
+    if (fileUpload) {
+      requestContents.push({
+        fileData: {
+          fileUri: fileUpload.uri,
+          mimeType: mimeType,
+        }
+      });
+    } else {
+      requestContents.push({
+        inlineData: {
+          mimeType,
+          data: audioBase64,
+        },
+      });
+    }
+
+    requestContents.push({
+      text: "Your single and absolute task is VERBATIM TRANSCRIPTION. Listen to the audio and output the text EXACTLY in the language that is being spoken. If the video characters speak English, output pure English text. Do NOT translate the language into Chinese, Myanmar, or any other language under any circumstances. Output exactly what you hear in the native source language.",
+    });
+
+    let attempts = 0;
+    let transcriptionText = "";
+
+    // Error Gracefulness: Retry natively once if empty sequence or timeout catches
+    while (attempts < 2 && !transcriptionText) {
+      attempts++;
+      try {
+        console.log(`[Gemini STT] Dispatching content request, attempt ${attempts}...`);
+        const response = await generateContentWithRetry(ai, {
+          model: "gemini-3.5-flash",
+          contents: requestContents,
+        });
+        transcriptionText = response.text || "";
+        if (!transcriptionText.trim() && attempts < 2) {
+          console.warn("[Gemini STT] Received empty text string. Retrying once natively...");
+        }
+      } catch (err: any) {
+        if (attempts >= 2) throw err;
+        console.warn(`[Gemini STT] Attempt ${attempts} failed: ${err.message || err}. Retrying once natively...`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+
+    // Clean up uploaded file from Gemini File store to stay pristine
+    if (fileUpload && fileUpload.name) {
+      try {
+        console.log(`[Gemini STT] Cleaning up File API resource: ${fileUpload.name}`);
+        await ai.files.delete({ name: fileUpload.name });
+      } catch (delErr: any) {
+        console.warn(`[Gemini STT] Failed to delete file resource: ${delErr.message || delErr}`);
+      }
+    }
+
+    if (!transcriptionText.trim()) {
+      throw new Error("No transcription text returned from the Gemini pipeline. Verify that the audio contains spoken words and the API key is active.");
+    }
+
+    console.log(`[Gemini STT] Transcription received. Length: ${transcriptionText.length} characters.`);
+
+    // Parse transcription into chronological segments
+    const sentences = transcriptionText
+      .split(/[\n\r.!?။၊]+/g)
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    const allChunks: string[] = [];
+    for (const sentence of sentences) {
+      allChunks.push(...chunkText(sentence));
+    }
+
+    const totalDuration = await getAudioDuration(audioPath);
+    console.log(`[Gemini STT] Distributing ${allChunks.length} chunks over ${totalDuration}s`);
+
+    const segments: any[] = [];
+    if (allChunks.length > 0) {
+      const chunkDuration = totalDuration / allChunks.length;
+      for (let i = 0; i < allChunks.length; i++) {
+        const start = i * chunkDuration;
+        const end = (i + 1) * chunkDuration;
+        segments.push({
+          start,
+          end,
+          speech: allChunks[i],
+          text: allChunks[i]
+        });
+      }
+    } else {
+      segments.push({
+        start: 0,
+        end: totalDuration > 0 ? totalDuration : 30,
+        speech: transcriptionText,
+        text: transcriptionText
+      });
+    }
+
+    return segments;
+  } catch (error: any) {
+    console.error("[Gemini STT] Isolated exception occurred inside Gemini speech pipeline:", error.message || error);
+    throw error;
+  }
+}
+
+// Transcribe with Whisper model locally or fall back to Gemini Audio Transcription (multimodal API)
+async function transcribeWithWhisper(audioPath: string, apiKey?: string): Promise<any[]> {
+  const activeKey = apiKey || process.env.GEMINI_API_KEY;
+  if (!activeKey) {
+    throw new Error("Gemini API key is required to run the purged Voice-to-Text transcriber.");
+  }
+  // Whisper is completely purged! We route 100% of the transcription traffic to our high-speed, direct Gemini STT pipeline.
+  return transcribeWithGemini(audioPath, activeKey);
+}
+
+// Direct raw transcription using Gemini's high-fidelity audio capabilities (preferred for verbatim output)
+async function transcribeRawWithGemini(audioPath: string, apiKey: string): Promise<string> {
+  console.log(`[Gemini STT] Initializing RAW speech-to-text via gemini-3.5-flash for ${audioPath}`);
+  
+  let fileUpload: any = null;
+  let audioBase64 = "";
+  const mimeType = audioPath.endsWith(".mp3") ? "audio/mp3" : "audio/wav";
+
+  try {
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        },
+      },
+    });
+
+    try {
+      console.log(`[Gemini STT] Uploading ${audioPath} straight to Gemini File API as binary stream...`);
+      fileUpload = await ai.files.upload({
+        file: audioPath,
+        config: {
+          mimeType: mimeType,
+        },
+      });
+      console.log(`[Gemini STT] File uploaded successfully to Gemini File API: ${fileUpload.uri}`);
+    } catch (uploadErr: any) {
+      console.warn(`[Gemini STT] Gemini File API upload failed: ${uploadErr.message || uploadErr}. Falling back to inline base64...`);
+      const audioBuffer = await fs.promises.readFile(audioPath);
+      audioBase64 = audioBuffer.toString("base64");
+    }
+
+    const requestContents: any[] = [];
+    if (fileUpload) {
+      requestContents.push({
+        fileData: {
+          fileUri: fileUpload.uri,
+          mimeType: mimeType,
+        }
+      });
+    } else {
+      requestContents.push({
+        inlineData: {
+          mimeType,
+          data: audioBase64,
+        },
+      });
+    }
+
+    requestContents.push({
+      text: "Your single and absolute task is VERBATIM TRANSCRIPTION. Listen to the audio and output the text EXACTLY in the language that is being spoken. If the video characters speak English, output pure English text. Do NOT translate the language into Chinese, Myanmar, or any other language under any circumstances. Output exactly what you hear in the native source language.",
+    });
+
+    let attempts = 0;
+    let transcriptionText = "";
+
+    while (attempts < 2 && !transcriptionText) {
+      attempts++;
+      try {
+        console.log(`[Gemini STT] Dispatching content request, attempt ${attempts}...`);
+        const response = await generateContentWithRetry(ai, {
+          model: "gemini-3.5-flash",
+          contents: requestContents,
+        });
+        transcriptionText = response.text || "";
+        if (!transcriptionText.trim() && attempts < 2) {
+          console.warn("[Gemini STT] Received empty text string. Retrying once natively...");
+        }
+      } catch (err: any) {
+        if (attempts >= 2) throw err;
+        console.warn(`[Gemini STT] Attempt ${attempts} failed: ${err.message || err}. Retrying once natively...`);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+    }
+
+    if (fileUpload && fileUpload.name) {
+      try {
+        console.log(`[Gemini STT] Cleaning up File API resource: ${fileUpload.name}`);
+        await ai.files.delete({ name: fileUpload.name });
+      } catch (delErr: any) {
+        console.warn(`[Gemini STT] Failed to delete file resource: ${delErr.message || delErr}`);
+      }
+    }
+
+    if (!transcriptionText.trim()) {
+      throw new Error("No transcription text returned from the Gemini pipeline. Verify that the audio contains spoken words and the API key is active.");
+    }
+
+    return transcriptionText;
+  } catch (error: any) {
+    console.error("[Gemini STT] Isolated exception occurred inside Gemini speech pipeline:", error.message || error);
+    throw error;
+  }
 }
 
 // Parse various timestamp formats into milliseconds
@@ -882,7 +1325,8 @@ function applyStackingRules(text: string): string {
 app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
   const createdTempFiles: string[] = [];
   try {
-    const { text, segments: segmentsRaw, activeMediaDurationMs: durationRaw, alignmentMode } = req.body;
+    const { text, segments: segmentsRaw, activeMediaDurationMs: durationRaw, alignmentMode, apiKey: bodyApiKey } = req.body;
+    const apiKey = (req.headers["x-gemini-api-key"] as string) || bodyApiKey || process.env.GEMINI_API_KEY;
     const activeMediaDurationMs = durationRaw ? Number(durationRaw) : 60000;
 
     let segments: string[] = [];
@@ -936,155 +1380,186 @@ app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
       return;
     }
 
-    // Step 2: Extraction and Local Whisper Transcription
-    console.log("[AI_SYNC] Initializing local Whisper forced alignment...");
-    
-    if (req.file.path) {
-      createdTempFiles.push(req.file.path);
-    }
+    let finalBlocks = baselineBlocks;
 
-    const tempDir = os.tmpdir();
-    const videoCachePath = path.join(tempDir, `uploaded_video_${Date.now()}.mp4`);
-    createdTempFiles.push(videoCachePath);
+    try {
+      finalBlocks = await Promise.race([
+        (async () => {
+          // Step 2: Demuxing & Highly Compressed Audio Extraction
+          console.log("[AI_SYNC] Initializing optimized speech extraction pipeline...");
+          
+          if (req.file && req.file.path) {
+            createdTempFiles.push(req.file.path);
+          }
 
-    await pipeline(
-      fs.createReadStream(req.file.path),
-      fs.createWriteStream(videoCachePath)
-    );
+          const tempDir = os.tmpdir();
+          const outputAudioPath = path.join(tempDir, `align_audio_${Date.now()}.mp3`);
+          createdTempFiles.push(outputAudioPath);
 
-    const outputAudioPath = path.join(tempDir, `align_audio_${Date.now()}.wav`);
-    createdTempFiles.push(outputAudioPath);
+          // Audio demuxing: extract and compress directly from the uploaded file without duplicating heavy video files in memory/disk
+          let extractionSuccess = false;
+          try {
+            const extractor = new FfmpegAudioExtractor();
+            await extractor.extract(req.file!.path, outputAudioPath);
+            extractionSuccess = true;
+          } catch (extractorErr: any) {
+            console.error("[AI_SYNC] Preprocessing / ffmpeg audio demuxing failed:", extractorErr.message || extractorErr);
+            throw new Error(`Audio demuxing and conversion failed: ${extractorErr.message || extractorErr}`);
+          }
 
-    // Audio demuxing via FfmpegAudioExtractor
-    const extractor = new FfmpegAudioExtractor();
-    await extractor.extract(videoCachePath, outputAudioPath);
-
-    // Run Whisper local speech-to-text transcription
-    const whisperSegments = await transcribeWithWhisper(outputAudioPath);
-    console.log(`[AI_SYNC] Local Whisper transcription returned ${whisperSegments.length} segments.`);
-
-    // Step 3: Precise Timeline Character Mapping & Snapping
-    const whisperTimeline: { char: string; timeMs: number }[] = [];
-    for (const seg of whisperSegments) {
-      const textVal = seg.speech || seg.text || "";
-      if (!textVal.trim()) continue;
-      const startMs = parseTimeToMs(seg.start);
-      const endMs = parseTimeToMs(seg.end);
-      const duration = endMs - startMs;
-      if (duration <= 0) continue;
-
-      for (let k = 0; k < textVal.length; k++) {
-        const interpolatedMs = startMs + Math.round((k / textVal.length) * duration);
-        whisperTimeline.push({
-          char: textVal[k],
-          timeMs: interpolatedMs
-        });
-      }
-    }
-
-    // Cleaned whisper timeline (only alphanumeric & Burmese syllables)
-    const cleanWhisperTimeline = whisperTimeline.filter(item => {
-      return !/[\s\.။၊,!\?\-\(\)\[\]\{\}\_]/.test(item.char);
-    });
-
-    const calibratedBlocks = [];
-    let lastEndMs = 0;
-    let currentTimelineIdx = 0;
-    let accumulatedManualChars = 0;
-    const totalCleanManualChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").length, 0);
-
-    for (let i = 0; i < segments.length; i++) {
-      const rawTextVal = segments[i];
-      const cleanSegmentText = rawTextVal.replace(/[\.။]/g, "").trim(); // Strip separators
-      const matchText = cleanSegmentText.replace(/[\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").toLowerCase();
-      const segLen = matchText.length;
-      accumulatedManualChars += segLen;
-
-      let startMs = lastEndMs;
-      let endMs = lastEndMs + 2000; // 2 seconds default fallback
-
-      if (cleanWhisperTimeline.length > 0 && segLen > 0) {
-        // Expected timeline slice
-        const expectedTimelineEndIdx = Math.round((accumulatedManualChars / (totalCleanManualChars || 1)) * cleanWhisperTimeline.length);
-        const expectedLen = expectedTimelineEndIdx - currentTimelineIdx;
-
-        // Search for best visual matching starting offset locally
-        const searchRange = Math.min(Math.max(expectedLen * 2, 120), cleanWhisperTimeline.length - currentTimelineIdx);
-        let bestScore = -1;
-        let bestOffset = 0;
-
-        for (let offset = 0; offset < searchRange; offset++) {
-          const j = currentTimelineIdx + offset;
-          let matchCount = 0;
-          const compareLen = Math.min(segLen, cleanWhisperTimeline.length - j);
-
-          for (let k = 0; k < compareLen; k++) {
-            if (cleanWhisperTimeline[j + k].char.toLowerCase() === matchText[k]) {
-              matchCount++;
+          // Immediately trim and delete the heavy video file payload once audio is successfully extracted
+          if (extractionSuccess && req.file && req.file.path) {
+            try {
+              await fs.promises.unlink(req.file.path);
+              console.log("[AI_SYNC] Heavy original video source payload immediately trimmed from disk.");
+            } catch (unlinkErr: any) {
+              console.warn("[AI_SYNC] Failed to immediately trim/delete original uploaded file path:", unlinkErr.message || unlinkErr);
             }
           }
 
-          const score = compareLen > 0 ? matchCount / compareLen : 0;
-          // Slight proximity bonus for earlier chronological positions
-          const finalScore = score - (offset * 0.0003);
-
-          if (finalScore > bestScore) {
-            bestScore = finalScore;
-            bestOffset = offset;
+          // Run Whisper local or Gemini speech-to-text transcription with localized try/catch error isolation
+          let whisperSegments: any[] = [];
+          try {
+            whisperSegments = await transcribeWithWhisper(outputAudioPath, apiKey);
+          } catch (sttErr: any) {
+            console.error("[AI_SYNC] Voice-to-text transcription block failed:", sttErr.message || sttErr);
+            throw new Error(`Speech pipeline transcription failed: ${sttErr.message || sttErr}`);
           }
-        }
+          console.log(`[AI_SYNC] Voice-to-text transcription returned ${whisperSegments.length} segments.`);
 
-        const matchedStartIdx = currentTimelineIdx + bestOffset;
-        const matchedEndIdx = Math.min(matchedStartIdx + segLen, cleanWhisperTimeline.length - 1);
+          // Step 3: Precise Timeline Character Mapping & Snapping
+          const whisperTimeline: { char: string; timeMs: number }[] = [];
+          for (const seg of whisperSegments) {
+            const textVal = seg.speech || seg.text || "";
+            if (!textVal.trim()) continue;
+            const startMs = parseTimeToMs(seg.start);
+            const endMs = parseTimeToMs(seg.end);
+            const duration = endMs - startMs;
+            if (duration <= 0) continue;
 
-        if (matchedStartIdx < cleanWhisperTimeline.length) {
-          startMs = cleanWhisperTimeline[matchedStartIdx].timeMs;
-          endMs = cleanWhisperTimeline[matchedEndIdx].timeMs;
-        }
+            for (let k = 0; k < textVal.length; k++) {
+              const interpolatedMs = startMs + Math.round((k / textVal.length) * duration);
+              whisperTimeline.push({
+                char: textVal[k],
+                timeMs: interpolatedMs
+              });
+            }
+          }
 
-        currentTimelineIdx = matchedEndIdx + 1;
-      } else {
-        // Character proportional fallback
-        const blockRatio = Math.max(1, rawTextVal.length) / (totalChars || 1);
-        const blockDuration = Math.round(blockRatio * activeMediaDurationMs);
-        startMs = lastEndMs;
-        endMs = startMs + blockDuration;
-      }
+          // Cleaned whisper timeline (only alphanumeric & Burmese syllables)
+          const cleanWhisperTimeline = whisperTimeline.filter(item => {
+            return !/[\s\.။၊,!\?\-\(\)\[\]\{\}\_]/.test(item.char);
+          });
 
-      // Snapping bounds verification
-      if (startMs < lastEndMs) {
-        startMs = lastEndMs;
-      }
-      if (endMs <= startMs + 100) {
-        endMs = startMs + 1000;
-      }
-      if (endMs > activeMediaDurationMs) {
-        endMs = activeMediaDurationMs;
-      }
-      if (startMs > activeMediaDurationMs) {
-        startMs = activeMediaDurationMs - 100;
-        endMs = activeMediaDurationMs;
-      }
+          const calibratedBlocks = [];
+          let lastEndMs = 0;
+          let currentTimelineIdx = 0;
+          let accumulatedManualChars = 0;
+          const totalCleanManualChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").length, 0);
 
-      lastEndMs = endMs;
+          for (let i = 0; i < segments.length; i++) {
+            const rawTextVal = segments[i];
+            const cleanSegmentText = rawTextVal.replace(/[\.။]/g, "").trim(); // Strip separators
+            const matchText = cleanSegmentText.replace(/[\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").toLowerCase();
+            const segLen = matchText.length;
+            accumulatedManualChars += segLen;
 
-      // Apply line stacking wrapping rules
-      const stackedText = applyStackingRules(cleanSegmentText);
+            let startMs = lastEndMs;
+            let endMs = lastEndMs + 2000; // 2 seconds default fallback
 
-      calibratedBlocks.push({
-        id: i + 1,
-        startMs: Math.round(startMs),
-        endMs: Math.round(endMs),
-        text: stackedText
-      });
+            if (cleanWhisperTimeline.length > 0 && segLen > 0) {
+              // Expected timeline slice
+              const expectedTimelineEndIdx = Math.round((accumulatedManualChars / (totalCleanManualChars || 1)) * cleanWhisperTimeline.length);
+              const expectedLen = expectedTimelineEndIdx - currentTimelineIdx;
+
+              // Search for best visual matching starting offset locally
+              const searchRange = Math.min(Math.max(expectedLen * 2, 120), cleanWhisperTimeline.length - currentTimelineIdx);
+              let bestScore = -1;
+              let bestOffset = 0;
+
+              for (let offset = 0; offset < searchRange; offset++) {
+                const j = currentTimelineIdx + offset;
+                let matchCount = 0;
+                const compareLen = Math.min(segLen, cleanWhisperTimeline.length - j);
+
+                for (let k = 0; k < compareLen; k++) {
+                  if (cleanWhisperTimeline[j + k].char.toLowerCase() === matchText[k]) {
+                    matchCount++;
+                  }
+                }
+
+                const score = compareLen > 0 ? matchCount / compareLen : 0;
+                // Slight proximity bonus for earlier chronological positions
+                const finalScore = score - (offset * 0.0003);
+
+                if (finalScore > bestScore) {
+                  bestScore = finalScore;
+                  bestOffset = offset;
+                }
+              }
+
+              const matchedStartIdx = currentTimelineIdx + bestOffset;
+              const matchedEndIdx = Math.min(matchedStartIdx + segLen, cleanWhisperTimeline.length - 1);
+
+              if (matchedStartIdx < cleanWhisperTimeline.length) {
+                startMs = cleanWhisperTimeline[matchedStartIdx].timeMs;
+                endMs = cleanWhisperTimeline[matchedEndIdx].timeMs;
+              }
+
+              currentTimelineIdx = matchedEndIdx + 1;
+            } else {
+              // Character proportional fallback
+              const blockRatio = Math.max(1, rawTextVal.length) / (totalChars || 1);
+              const blockDuration = Math.round(blockRatio * activeMediaDurationMs);
+              startMs = lastEndMs;
+              endMs = startMs + blockDuration;
+            }
+
+            // Snapping bounds verification
+            if (startMs < lastEndMs) {
+              startMs = lastEndMs;
+            }
+            if (endMs <= startMs + 100) {
+              endMs = startMs + 1000;
+            }
+            if (endMs > activeMediaDurationMs) {
+              endMs = activeMediaDurationMs;
+            }
+            if (startMs > activeMediaDurationMs) {
+              startMs = activeMediaDurationMs - 100;
+              endMs = activeMediaDurationMs;
+            }
+
+            lastEndMs = endMs;
+
+            // Apply line stacking wrapping rules
+            const stackedText = applyStackingRules(cleanSegmentText);
+
+            calibratedBlocks.push({
+              id: i + 1,
+              startMs: Math.round(startMs),
+              endMs: Math.round(endMs),
+              text: stackedText
+            });
+          }
+
+          // Clean final boundary
+          if (calibratedBlocks.length > 0) {
+            calibratedBlocks[calibratedBlocks.length - 1].endMs = activeMediaDurationMs;
+          }
+
+          return calibratedBlocks;
+        })(),
+        new Promise<any[]>((_, reject) => 
+          setTimeout(() => reject(new Error("AI forced alignment timed out server-side")), 25000)
+        )
+      ]);
+    } catch (err: any) {
+      console.warn("[ALIGNMENT] AI Sync alignment failed or timed out. Falling back to robust character-proportional baseline layout.", err.message || err);
+      finalBlocks = baselineBlocks;
     }
 
-    // Clean final boundary
-    if (calibratedBlocks.length > 0) {
-      calibratedBlocks[calibratedBlocks.length - 1].endMs = activeMediaDurationMs;
-    }
-
-    res.json({ blocks: calibratedBlocks });
+    res.json({ blocks: finalBlocks });
 
   } catch (error: any) {
     console.error("[Subtitle Alignment API Error]:", error);

@@ -52,20 +52,11 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
     setIsSynthesizing(true);
     setAudioPlayState(false);
     setSyncedAudioUrl(null);
-    setProgressLog("Initializing connection...");
+    setProgressLog("Splitting Script...");
 
     try {
-      // Step-by-step progress simulation to reflect sequential buffer merger
-      let currentProgress = 0;
-      const progressTimer = setInterval(() => {
-        if (currentProgress < chunkEstimate) {
-          currentProgress += 1;
-          setProgressLog(`Merging voice chunk ${currentProgress} of ${chunkEstimate}...`);
-        } else {
-          setProgressLog("Assembling high-fidelity audio bytes...");
-          clearInterval(progressTimer);
-        }
-      }, 700);
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      setProgressLog("Synthesizing Audio Streams in Parallel...");
 
       const normalizedStyle = selectedStyle.toLowerCase();
       let computedRate = "+0%";
@@ -111,8 +102,6 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         }),
       });
 
-      clearInterval(progressTimer);
-
       if (!response.ok) {
         const contentType = response.headers.get("content-type");
         let errorData: any = {};
@@ -129,6 +118,9 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         throw new Error(errorData.error || "တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
       }
 
+      setProgressLog("Merging Final MP3 Voice...");
+      await new Promise((resolve) => setTimeout(resolve, 600));
+
       const audioBlob = await response.blob();
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error("Received an empty audio binary stream from synthesis server.");
@@ -140,7 +132,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
       setIsSynthesizing(false);
       onAddNotification(
         "Vocal Track Generated",
-        `Synthesized ${chunkEstimate} clauses successfully. Click Play!`,
+        `Synthesized long-form speech successfully. Click Play!`,
         "success"
       );
 

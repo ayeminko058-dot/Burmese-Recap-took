@@ -95,7 +95,70 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
             throw new Error(data.error || "တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
           }
 
-          setTranslatedText(data.translation || "");
+          // Robust safety guard helper to parse and extract translated text
+          const parseAndFlattenResult = (input: any): string => {
+            if (!input) return "";
+            if (typeof input === "string") {
+              const trimmed = input.trim();
+              if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+                try {
+                  const parsed = JSON.parse(trimmed);
+                  return parseAndFlattenResult(parsed);
+                } catch {
+                  return input;
+                }
+              }
+              return input;
+            }
+            if (typeof input === "object") {
+              // Extract from candidate structure if returned nested
+              if (
+                input.candidates &&
+                Array.isArray(input.candidates) &&
+                input.candidates[0] &&
+                input.candidates[0].content &&
+                input.candidates[0].content.parts &&
+                Array.isArray(input.candidates[0].content.parts) &&
+                input.candidates[0].content.parts[0]
+              ) {
+                const part = input.candidates[0].content.parts[0];
+                if (typeof part === "string") return parseAndFlattenResult(part);
+                if (part && typeof part.text === "string") return parseAndFlattenResult(part.text);
+              }
+
+              const keysToCheck = ["translatedText", "translation", "text", "translated_text", "output", "result"];
+              for (const key of keysToCheck) {
+                if (input[key] !== undefined && input[key] !== null) {
+                  return parseAndFlattenResult(input[key]);
+                }
+              }
+
+              if (Array.isArray(input)) {
+                if (input.length > 0) return parseAndFlattenResult(input[0]);
+                return "";
+              }
+
+              if (typeof input.text === "string") {
+                return parseAndFlattenResult(input.text);
+              }
+
+              try {
+                return JSON.stringify(input);
+              } catch {
+                return "";
+              }
+            }
+            return String(input);
+          };
+
+          const finalTranslatedText = parseAndFlattenResult(data);
+          
+          if (!finalTranslatedText) {
+            throw new Error("ဘာသာပြန်ဆိုချက် ရယူရန် ပျက်ကွက်ခဲ့ပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+          }
+
+          // Explicitly update the state variable linked to the 'TRANSLATED OUTPUT' text box
+          setTranslatedText(finalTranslatedText);
           setStatus("completed");
           onAddNotification("Translation Success", "Translated successfully with Gemini.", "success");
         } catch (err: any) {

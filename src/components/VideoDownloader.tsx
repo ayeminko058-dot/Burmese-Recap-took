@@ -279,7 +279,7 @@ export default function VideoDownloader({
     }
   };
 
-  // Convert files to base64 helper
+  // Convert files to base64 helper (unused now, but kept for compatibility)
   const convertBlobToBase64 = (blob: Blob): Promise<string> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -291,6 +291,46 @@ export default function VideoDownloader({
       reader.onerror = reject;
       reader.readAsDataURL(blob);
     });
+  };
+
+  // Extract audio track locally from media file and downsample to 16kHz WAV
+  const extractAudioTrack = async (file: File): Promise<Blob> => {
+    const arrayBuffer = await file.arrayBuffer();
+    
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    const audioCtx = new AudioContextClass();
+    
+    let audioBuffer: AudioBuffer;
+    try {
+      audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    } catch (decodeErr) {
+      console.error("AudioContext.decodeAudioData failed, trying fallback:", decodeErr);
+      await audioCtx.close();
+      throw new Error("Could not decode audio data from this file. Verify that it is a valid, uncorrupted media file.");
+    }
+    
+    const targetSampleRate = 16000;
+    const numberOfChannels = 1;
+    const duration = audioBuffer.duration;
+    
+    // Cap maximum duration to 15 minutes to prevent out-of-memory or browser slowness on massive video files
+    const maxDuration = 900;
+    const finalDuration = Math.min(duration, maxDuration);
+    const totalSamples = Math.floor(finalDuration * targetSampleRate);
+    
+    const offlineCtx = new OfflineAudioContext(numberOfChannels, totalSamples, targetSampleRate);
+    
+    const bufferSource = offlineCtx.createBufferSource();
+    bufferSource.buffer = audioBuffer;
+    bufferSource.connect(offlineCtx.destination);
+    bufferSource.start(0, 0, finalDuration);
+    
+    const renderedBuffer = await offlineCtx.startRendering();
+    const monoSamples = renderedBuffer.getChannelData(0);
+    
+    const wavBlob = encodeMonoFloat32ToWav(monoSamples, targetSampleRate);
+    await audioCtx.close();
+    return wavBlob;
   };
 
   // Transcribe process
@@ -308,26 +348,43 @@ export default function VideoDownloader({
 
     setStatus("extracting_audio");
     setProgress(5);
-    setBackendStatusMsg("Converting media stream to base64 payload...");
+    setBackendStatusMsg("Stage 1: Extracting Audio Track locally in browser...");
     setErrorMsg(null);
 
     try {
-      onAddNotification("Uploading Track", "Initiating high-fidelity real-time pipeline to backend...", "info");
+      onAddNotification("Extracting Audio", "Running native browser audio engine extraction...", "info");
       
-      const fileBase64 = await convertBlobToBase64(selectedFile);
+      // Step 1: Local Audio Extraction (highly compressed WAV)
+      let audioBlob: Blob;
+      try {
+        audioBlob = await extractAudioTrack(selectedFile);
+        setProgress(35);
+        setBackendStatusMsg("Stage 1: Local audio track extracted successfully!");
+        onAddNotification("Extraction Successful", "Extracted optimized 16kHz audio track locally.", "success");
+      } catch (extractErr: any) {
+        console.warn("Local audio extraction failed, falling back to sending original file:", extractErr);
+        audioBlob = selectedFile;
+        setProgress(20);
+        setBackendStatusMsg("Stage 1 (Fallback): Sending original file directly...");
+      }
+
+      // Step 2: Upload and direct stream transcribing
+      setProgress(45);
+      setBackendStatusMsg("Stage 2: Transcribing speech via Gemini API...");
+      onAddNotification("Uploading Track", "Initiating high-speed audio stream pipeline to Gemini backend...", "info");
       
+      const formData = new FormData();
+      formData.append("file", audioBlob, `${selectedFile.name.replace(/\.[^/.]+$/, "")}_audio.wav`);
+      formData.append("format", formatSelection);
+      formData.append("fileName", selectedFile.name);
+      formData.append("mimeType", "audio/wav");
+
       const response = await fetch(getApiUrl("/api/subtitle/generate-stream"), {
         method: "POST",
         headers: {
-          "Content-Type": "application/json",
           "X-Gemini-API-Key": savedKey,
         },
-        body: JSON.stringify({
-          fileBase64,
-          fileName: selectedFile.name,
-          mimeType: selectedFile.type,
-          format: formatSelection,
-        }),
+        body: formData,
       });
 
       if (!response.ok) {
@@ -361,8 +418,9 @@ export default function VideoDownloader({
             const serverProgress = typeof payload.progress === "number" ? payload.progress : 0;
             const serverMsg = payload.message || "";
 
-            setProgress(serverProgress);
-            setBackendStatusMsg(serverMsg);
+            const displayProgress = Math.round(45 + (serverProgress * 0.55));
+            setProgress(Math.min(displayProgress, 99));
+            setBackendStatusMsg(`Stage 2: ${serverMsg}`);
 
             // Dynamically adjust status to reflect backend progress perfectly
             if (serverProgress < 50) {
@@ -388,17 +446,34 @@ export default function VideoDownloader({
       triggerInterstitialAd(
         "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာသားအဖြေကို ရယူပါ",
         () => {
+          let cleanPlain = "";
           if (formatSelection === "srt") {
             setSrtSubtitles(resultText);
             setActiveTab("srt");
             // Also generate fallback plain text by stripping srt lines
-            const strippedText = resultText.replace(/\d+\r?\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\r?\n/g, "").replace(/\r?\n\r?\n/g, "\n");
-            setPlainTranscript(strippedText.trim());
+            let strippedText = resultText.replace(/\d+\r?\n\d{2}:\d{2}:\d{2},\d{3} --> \d{2}:\d{2}:\d{2},\d{3}\r?\n/g, "").replace(/\r?\n\r?\n/g, "\n");
+            // Strip brackets, timelines, and loose timestamps like 00:00, 00:15, etc.
+            strippedText = strippedText.replace(/\[\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\]/g, "");
+            strippedText = strippedText.replace(/\(\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\)/g, "");
+            strippedText = strippedText.replace(/\b\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\b/g, "");
+            strippedText = strippedText.replace(/\[\s*\]/g, "").replace(/\(\s*\)/g, "");
+            strippedText = strippedText.replace(/\s+/g, " ");
+            cleanPlain = strippedText.trim();
+            setPlainTranscript(cleanPlain);
           } else {
-            setPlainTranscript(resultText);
+            let cleanedText = resultText;
+            // Strip brackets, timelines, and loose timestamps like 00:00, 00:15, etc.
+            cleanedText = cleanedText.replace(/\[\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\]/g, "");
+            cleanedText = cleanedText.replace(/\(\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\)/g, "");
+            cleanedText = cleanedText.replace(/\b\d{1,2}:\d{2}(:\d{2})?(\.\d+)?\b/g, "");
+            cleanedText = cleanedText.replace(/\[\s*\]/g, "").replace(/\(\s*\)/g, "");
+            cleanedText = cleanedText.replace(/\s+/g, " ");
+            
+            cleanPlain = cleanedText.trim();
+            setPlainTranscript(cleanPlain);
             setActiveTab("transcript");
             // Create an approximate SRT mapping if user selected TXT but clicks SRT later
-            const lines = resultText.split(/\r?\n/).filter((l: string) => l.trim().length > 0);
+            const lines = cleanPlain.split(/\r?\n/).filter((l: string) => l.trim().length > 0);
             let approxSrt = "";
             lines.forEach((line: string, idx: number) => {
               const step = 4;
@@ -426,7 +501,7 @@ export default function VideoDownloader({
             if (formatSelection === "srt") {
               onAddDownloadedFile(`${baseName}_subtitles.srt`, resultText, "srt");
             } else {
-              onAddDownloadedFile(`${baseName}_transcript.txt`, resultText, "srt"); 
+              onAddDownloadedFile(`${baseName}_transcript.txt`, cleanPlain, "srt"); 
             }
           }
         },
