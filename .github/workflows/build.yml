@@ -1,4 +1,4 @@
-name: Build Application
+name: Build Android APK
 
 on:
   push:
@@ -13,12 +13,18 @@ on:
 
 jobs:
   build:
-    name: Build Web App and Server
+    name: Build Native Debug APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -29,24 +35,53 @@ jobs:
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
-      - name: Download Whisper Model for Subtitle Aligner Module
+      - name: Create Production .env file
         run: |
-          # Isolate model downloading specifically for Subtitle Aligner Forced Alignment Engine
-          wget -q https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
-          mkdir -p assets/models
-          cp ggml-tiny.bin assets/models/
+          echo "VITE_GEMINI_API_KEY=\"\${{ secrets.VITE_GEMINI_API_KEY }}\"" > .env
+          echo "VITE_APP_URL=\"\${{ secrets.VITE_APP_URL || 'https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app' }}\"" >> .env
+          echo "GEMINI_API_KEY=\"\${{ secrets.GEMINI_API_KEY || secrets.VITE_GEMINI_API_KEY }}\"" >> .env
 
-      - name: Compile Application
-        run: npm run build
+      - name: Build Web Assets for Capacitor
+        run: |
+          npm run build
 
-      - name: Upload Build Artifacts
+      - name: Check/Add Capacitor Android Platform
+        run: |
+          if [ ! -d "android" ]; then
+            echo "Android native platform folder is missing. Instantiating via Capacitor CLI..."
+            npx cap add android
+          else
+            echo "Android native platform folder already checked into repository."
+          fi
+
+      - name: Sync Web Assets to Native Android Project
+        run: |
+          npx cap sync android
+
+      - name: Force Fix and Regenerate Gradle Wrapper
+        run: |
+          cd android
+          rm -f gradle/wrapper/gradle-wrapper.jar
+          gradle wrapper --gradle-version 8.13
+
+      - name: Grant Execute Permission to Gradle Wrapper
+        run: |
+          if [ -f "android/gradlew" ]; then
+            echo "Granting execution permissions to gradlew..."
+            chmod +x android/gradlew
+          else
+            echo "gradlew not found!"
+            exit 1
+          fi
+
+      - name: Build Debug Android APK
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: production-app-package
-          path: |
-            .next/
-            dist/
-            build/
-            assets/models/ggml-tiny.bin
-            dist/assets/models/ggml-tiny.bin
-
+          name: app-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
