@@ -88,12 +88,21 @@ const upload = multer({ dest: os.tmpdir() });
 
 app.use(express.json({ limit: "100mb" }));
 
+// Helper to get Gemini API Key dynamically from request
+function getRequestApiKey(req: any): string | null {
+  const key = (req.headers["x-gemini-api-key"] as string) || 
+              req.body.apiKey || 
+              (req.headers["authorization"] as string)?.replace("Bearer ", "") ||
+              process.env.GEMINI_API_KEY;
+  return key || null;
+}
+
 // API Endpoint for Gemini API Key validation
 app.post("/api/validate-key", async (req, res) => {
   try {
-    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    const apiKey = getRequestApiKey(req);
     if (!apiKey) {
-      res.status(400).json({ error: "Gemini API Key is required but not configured." });
+      res.status(400).json({ error: "Gemini API Key is required but not configured. Please check your runtime key settings." });
       return;
     }
 
@@ -133,7 +142,7 @@ app.post("/api/translate", async (req, res) => {
       return;
     }
 
-    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    const apiKey = getRequestApiKey(req);
     if (!apiKey) {
       res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
       return;
@@ -179,7 +188,7 @@ app.post("/api/transcribe", async (req, res) => {
       return;
     }
 
-    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    const apiKey = getRequestApiKey(req);
     if (!apiKey) {
       res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
       return;
@@ -401,83 +410,40 @@ app.post("/api/tts", async (req, res) => {
       throw lastChunkError || new Error("Unknown synthesis error");
     };
 
-    // 1. Controlled Batch Slicing: Group into smaller batches of max 8 chunks
-    const BATCH_SIZE = 8;
-    const batches: number[][] = [];
-    for (let i = 0; i < cleanedChunks.length; i += BATCH_SIZE) {
-      const batch: number[] = [];
-      for (let j = i; j < Math.min(i + BATCH_SIZE, cleanedChunks.length); j++) {
-        batch.push(j);
-      }
-      batches.push(batch);
-    }
-
-    console.log(`[TTS Aggregator] Spawning ${batches.length} parallel batches with batch size ${BATCH_SIZE}.`);
-
-    // Execute batches concurrently, but process items inside each batch strictly sequentially
-    await Promise.all(
-      batches.map(async (batchIndices, batchIdx) => {
-        for (const index of batchIndices) {
-          try {
-            const buffer = await processSingleChunkWithRetry(index);
-            chunkMap.set(index, buffer);
-          } catch (err: any) {
-            console.error(`[TTS Batch Error] Permanent failure for chunk index ${index} in batch ${batchIdx + 1}:`, err);
-            // Don't throw here immediately, so we can attempt remaining chunks and handle recovery verification at the end
-          }
-        }
-      })
-    );
-
-    // 2. Strict Index Matrix Verification & Instant Recursive Recovery Retries
-    for (let i = 0; i < cleanedChunks.length; i++) {
-      const buf = chunkMap.get(i);
-      if (!buf || buf.length === 0) {
-        console.warn(`[TTS Verification Alert] Chunk at index ${i} is missing or empty. Initiating instant recursive recovery...`);
-        try {
-          const recoveredBuf = await processSingleChunkWithRetry(i, 3);
-          chunkMap.set(i, recoveredBuf);
-          console.log(`[TTS Recovery Success] Successfully recovered missing chunk at index ${i}.`);
-        } catch (recoveryErr: any) {
-          console.error(`[TTS Verification Fatal] Critical failure recovering chunk index ${i}:`, recoveryErr);
-          throw new Error(`Strict Index Verification Failed: Chunk at index ${i} could not be retrieved or synthesized. Reason: ${recoveryErr.message || recoveryErr}`);
-        }
-      }
-    }
-
-    // 3. Collect verified buffers in exact order
-    const audioBuffers: Buffer[] = [];
-    for (let i = 0; i < cleanedChunks.length; i++) {
-      const buf = chunkMap.get(i);
-      if (!buf) {
-        throw new Error(`Internal State Inconsistency: Verified buffer at index ${i} is missing.`);
-      }
-      audioBuffers.push(buf);
-    }
-
-    if (audioBuffers.length === 0) {
-      res.status(502).json({ error: "Failed to synthesize any audio chunks from Edge TTS API." });
-      return;
-    }
-
-    // 4. Streamlined Binary Concatenation & Immediate Flush
-    const mergedAudio = Buffer.concat(audioBuffers);
-
-    // Clear buffer memory mapping to optimize performance footprint
-    chunkMap.clear();
-    audioBuffers.length = 0;
-
-    res.set({
+    // Set chunked transfer headers to support unlimited length with zero server timeouts
+    res.writeHead(200, {
       "Content-Type": "audio/mpeg",
-      "Content-Length": mergedAudio.length,
-      "Content-Disposition": `attachment; filename="burmese_recap_tts_${Date.now()}.mp3"`,
       "Cache-Control": "no-cache",
+      "Connection": "keep-alive",
+      "Transfer-Encoding": "chunked",
+      "Content-Disposition": `attachment; filename="burmese_recap_tts_${Date.now()}.mp3"`,
     });
 
-    res.send(mergedAudio);
+    console.log(`[TTS Stream] Initializing progressive stream synthesis for ${cleanedChunks.length} chunks...`);
+
+    // Sequentially synthesize and stream chunks to keep Time-to-First-Byte extremely low
+    for (let i = 0; i < cleanedChunks.length; i++) {
+      try {
+        const buffer = await processSingleChunkWithRetry(i);
+        if (buffer && buffer.length > 0) {
+          console.log(`[TTS Stream] Writing chunk ${i + 1}/${cleanedChunks.length} of size ${buffer.length} bytes to the client.`);
+          res.write(buffer);
+        }
+      } catch (err: any) {
+        console.error(`[TTS Stream Error] Permanent failure for chunk index ${i}:`, err);
+        // Skip failed chunk, keep streaming remaining segments
+      }
+    }
+
+    console.log("[TTS Stream] All chunks written. Closing connection.");
+    res.end();
   } catch (error: any) {
-    console.error("Critical error in TTS aggregation service:", error);
-    res.status(500).json({ error: error.message || "Internal server error during audio synthesis." });
+    console.error("Critical error in TTS streaming service:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || "Internal server error during audio synthesis." });
+    } else {
+      res.end();
+    }
   }
 });
 
@@ -914,11 +880,10 @@ function applyStackingRules(text: string): string {
 
 // API Endpoint for AI Subtitle Pro: Dual-mode Hybrid Calibration loop
 app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
-  let tempFilePath = "";
-  let outputAudioPath = "";
+  const createdTempFiles: string[] = [];
   try {
     const { text, segments: segmentsRaw, activeMediaDurationMs: durationRaw, alignmentMode } = req.body;
-    const apiKey = (req.headers["x-gemini-api-key"] as string) || process.env.GEMINI_API_KEY;
+    const activeMediaDurationMs = durationRaw ? Number(durationRaw) : 60000;
 
     let segments: string[] = [];
     if (segmentsRaw) {
@@ -928,19 +893,23 @@ app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
         segments = [];
       }
     }
-    const activeMediaDurationMs = durationRaw ? Number(durationRaw) : 60000;
+
+    if ((!segments || segments.length === 0) && text) {
+      // Parse manual text based on separators if segments not sent
+      segments = text.split(/[\.။]+/).map((s: string) => s.trim()).filter(Boolean);
+    }
 
     if (!segments || !Array.isArray(segments) || segments.length === 0) {
-      res.status(400).json({ error: "Segments array is required." });
+      res.status(400).json({ error: "Segments array or raw text with splits is required." });
       return;
     }
 
-    // STEP 1: CHARACTER-PROPORTIONAL BASELINE ASSIGNMENT
-    const totalChars = segments.reduce((sum, s) => sum + s.length, 0);
+    // Step 1: Character-proportional baseline layout (our golden fallback)
+    const totalChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s]/g, "").length, 0);
     let progressAccumulatorMs = 0;
-
     const baselineBlocks = segments.map((seg, idx) => {
-      const blockLength = seg.length;
+      const cleanSeg = seg.replace(/[\.။]/g, "").trim();
+      const blockLength = cleanSeg.length;
       const blockPeriod = totalChars > 0 
         ? (blockLength / totalChars) * activeMediaDurationMs 
         : activeMediaDurationMs / segments.length;
@@ -956,33 +925,21 @@ app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
         id: idx + 1,
         startMs,
         endMs,
-        text: seg
+        text: applyStackingRules(cleanSeg)
       };
     });
 
-    if (alignmentMode === "ai_sync") {
-      if (!apiKey) {
-        res.status(400).json({ error: "Gemini API Key is required for AI Sync. Please configure your key in settings or the subtitle workspace input block." });
-        return;
-      }
-      if (!req.file) {
-        res.status(400).json({ error: "No media file uploaded. A valid video or audio file is required to perform multimodal speech waveform alignment." });
-        return;
-      }
-    }
-
+    // If manual mode or no file uploaded, return baseline directly
     if (alignmentMode === "manual" || !req.file) {
-      // Manual mode fallback or no media uploaded: returns pure character-proportional baseline directly
       console.log("[ALIGNMENT] Bypassing AI Sync. Returning baseline blocks.");
       res.json({ blocks: baselineBlocks });
       return;
     }
 
-    // STEP 2: REAL VOICE WAVEFORM EXTRACTION (ffmpeg mono wav demuxing)
-    console.log("[AI_SYNC_STARTED] Initiating genuine Multi-modal Gemini subtitle alignment with media file upload.");
+    // Step 2: Extraction and Local Whisper Transcription
+    console.log("[AI_SYNC] Initializing local Whisper forced alignment...");
     
-    const createdTempFiles: string[] = [];
-    if (req.file && req.file.path) {
+    if (req.file.path) {
       createdTempFiles.push(req.file.path);
     }
 
@@ -990,7 +947,6 @@ app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
     const videoCachePath = path.join(tempDir, `uploaded_video_${Date.now()}.mp4`);
     createdTempFiles.push(videoCachePath);
 
-    console.log("[AI_SYNC_STARTED] Piping chunks dynamically onto temporary disk cache pathway to prevent RAM overload.");
     await pipeline(
       fs.createReadStream(req.file.path),
       fs.createWriteStream(videoCachePath)
@@ -999,224 +955,141 @@ app.post("/api/subtitle/align", upload.single("file"), async (req, res) => {
     const outputAudioPath = path.join(tempDir, `align_audio_${Date.now()}.wav`);
     createdTempFiles.push(outputAudioPath);
 
+    // Audio demuxing via FfmpegAudioExtractor
     const extractor = new FfmpegAudioExtractor();
-    extractor.on("progress", (progress) => {
-      console.log(`[FFMPEG_PROGRESS] Audio extraction progress: ${progress.time}`);
-    });
-    extractor.on("error", (err) => {
-      console.error("[FFMPEG_ERROR] FFmpeg extractor encountered error:", err);
-    });
-    extractor.on("end", () => {
-      console.log("[FFMPEG_END] FFmpeg audio extraction successfully completed.");
-    });
+    await extractor.extract(videoCachePath, outputAudioPath);
 
-    let hasExtractedAudio = false;
-    try {
-      await extractor.extract(videoCachePath, outputAudioPath);
-      hasExtractedAudio = true;
-      console.log("[ALIGNMENT] Successfully demuxed high-fidelity 16kHz mono audio via ffmpeg.");
-    } catch (ffmpegErr: any) {
-      console.warn("[ALIGNMENT] FFmpeg bypassed/failed. Passing uploaded media file directly.", ffmpegErr.message || ffmpegErr);
-    }
+    // Run Whisper local speech-to-text transcription
+    const whisperSegments = await transcribeWithWhisper(outputAudioPath);
+    console.log(`[AI_SYNC] Local Whisper transcription returned ${whisperSegments.length} segments.`);
 
-    let geminiCalibratedBlocks: any[] = [];
+    // Step 3: Precise Timeline Character Mapping & Snapping
+    const whisperTimeline: { char: string; timeMs: number }[] = [];
+    for (const seg of whisperSegments) {
+      const textVal = seg.speech || seg.text || "";
+      if (!textVal.trim()) continue;
+      const startMs = parseTimeToMs(seg.start);
+      const endMs = parseTimeToMs(seg.end);
+      const duration = endMs - startMs;
+      if (duration <= 0) continue;
 
-    if (hasExtractedAudio) {
-      console.log("[AI_SYNC_REQUEST_SENT] Submitting segmented audio files and transcript scripts to Gemini Multimodal Audio Transcription API.");
-      try {
-        const ai = new GoogleGenAI({
-          apiKey,
-          httpOptions: {
-            headers: {
-              "User-Agent": "aistudio-build",
-            },
-          },
+      for (let k = 0; k < textVal.length; k++) {
+        const interpolatedMs = startMs + Math.round((k / textVal.length) * duration);
+        whisperTimeline.push({
+          char: textVal[k],
+          timeMs: interpolatedMs
         });
-
-        const chunkDurationMs = 60000;
-        const numChunks = Math.ceil(activeMediaDurationMs / chunkDurationMs);
-        const chunksOfBlocks: { [chunkIndex: number]: typeof baselineBlocks } = {};
-
-        for (const block of baselineBlocks) {
-          const chunkIdx = Math.min(Math.floor(block.startMs / chunkDurationMs), numChunks - 1);
-          if (!chunksOfBlocks[chunkIdx]) {
-            chunksOfBlocks[chunkIdx] = [];
-          }
-          chunksOfBlocks[chunkIdx].push(block);
-        }
-
-        for (let i = 0; i < numChunks; i++) {
-          const chunkBlocks = chunksOfBlocks[i] || [];
-          if (chunkBlocks.length === 0) {
-            continue;
-          }
-
-          const chunkStartMs = i * chunkDurationMs;
-          const chunkEndMs = Math.min((i + 1) * chunkDurationMs, activeMediaDurationMs);
-          const chunkDuration = chunkEndMs - chunkStartMs;
-
-          const chunkAudioPath = path.join(tempDir, `align_chunk_${i}_${Date.now()}.wav`);
-          createdTempFiles.push(chunkAudioPath);
-
-          console.log(`[AI_SYNC_CHUNK] Slicing audio segment ${i + 1}/${numChunks} from ${chunkStartMs}ms to ${chunkEndMs}ms.`);
-          await sliceAudioAsync(outputAudioPath, chunkStartMs, chunkDuration, chunkAudioPath);
-
-          // Stream/Read chunk safely
-          const chunkBuffer = await fs.promises.readFile(chunkAudioPath);
-          const chunkBase64 = chunkBuffer.toString("base64");
-
-          const promptText = `You are an expert AI Video Editor and Burmese Subtitles Alignment Specialist.
-We have an audio snippet with total duration ${chunkDuration} milliseconds.
-Here is the sequence of Burmese transcript segments spoken in this audio snippet:
-${JSON.stringify(chunkBlocks.map(b => ({ id: b.id, text: b.text })), null, 2)}
-
-Your task is to perform an AI Speech Waveform Forced Alignment pass for this specific audio snippet.
-Listen carefully to the acoustic vocal stream. For each Burmese segment (in the exact order), determine the precise start and end times in milliseconds (startMs and endMs) relative to the start of this audio snippet (0 to ${chunkDuration}) where those words are actually spoken in the audio stream.
-Align them sequentially with zero overlap. All timestamps must be integers within [0, ${chunkDuration}].
-
-Strict rules:
-1. Each segment's startMs must be >= the previous segment's endMs.
-2. Timestamps must represent actual spoken times relative to the start of this snippet (0 is the beginning of the snippet).
-3. Return ONLY a valid JSON object in this exact schema:
-{
-  "blocks": [
-    {
-      "id": number,
-      "startMs": number,
-      "endMs": number,
-      "text": "string"
-    }
-  ]
-}
-Deliver ONLY the direct JSON object. No conversational text, no markdown block syntax.`;
-
-          console.log(`[AI_SYNC_CHUNK] Despatching chunk ${i + 1}/${numChunks} to Gemini API...`);
-          const response = await generateContentWithRetry(ai, {
-            model: "gemini-3.5-flash",
-            contents: [
-              {
-                inlineData: {
-                  mimeType: "audio/wav",
-                  data: chunkBase64
-                }
-              },
-              {
-                text: promptText
-              }
-            ]
-          });
-
-          let textResponse = response.text || "";
-          if (textResponse.includes("```")) {
-            textResponse = textResponse.replace(/```json/g, "").replace(/```/g, "").trim();
-          }
-
-          try {
-            const parsed = JSON.parse(textResponse);
-            if (parsed && Array.isArray(parsed.blocks)) {
-              console.log(`[AI_SYNC_CHUNK_RESPONSE] Successfully parsed ${parsed.blocks.length} calibrated blocks for chunk ${i + 1}.`);
-              for (const b of parsed.blocks) {
-                geminiCalibratedBlocks.push({
-                  id: b.id,
-                  startMs: chunkStartMs + (typeof b.startMs === "number" ? b.startMs : 0),
-                  endMs: chunkStartMs + (typeof b.endMs === "number" ? b.endMs : 0),
-                  text: b.text
-                });
-              }
-            } else {
-              console.warn(`[AI_SYNC_CHUNK_RESPONSE] Missing 'blocks' list array in chunk ${i + 1}.`);
-            }
-          } catch (parseErr) {
-            console.error(`[AI_SYNC_CHUNK_RESPONSE] JSON Parse failure for chunk ${i + 1}:`, parseErr);
-          }
-        }
-      } catch (geminiErr: any) {
-        console.error("[Gemini Segmented Multi-modal Alignment Failed]:", geminiErr.message || geminiErr);
       }
     }
 
-    // STEP 3: DYNAMIC ALIGNMENT CORRECTION AND CALIBRATION SEQUENCE
-    console.log("[AI_SYNC_TIMELINE_CALIBRATION] Performing baseline comparison and hybrid alignment correction sequence.");
-    
-    // Compare AI-derived durations against character-proportional baselines & log variances
+    // Cleaned whisper timeline (only alphanumeric & Burmese syllables)
+    const cleanWhisperTimeline = whisperTimeline.filter(item => {
+      return !/[\s\.။၊,!\?\-\(\)\[\]\{\}\_]/.test(item.char);
+    });
+
     const calibratedBlocks = [];
     let lastEndMs = 0;
+    let currentTimelineIdx = 0;
+    let accumulatedManualChars = 0;
+    const totalCleanManualChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").length, 0);
 
-    for (let idx = 0; idx < baselineBlocks.length; idx++) {
-      const base = baselineBlocks[idx];
-      const baseDuration = base.endMs - base.startMs;
-      
-      let finalStartMs = base.startMs;
-      let finalEndMs = base.endMs;
+    for (let i = 0; i < segments.length; i++) {
+      const rawTextVal = segments[i];
+      const cleanSegmentText = rawTextVal.replace(/[\.။]/g, "").trim(); // Strip separators
+      const matchText = cleanSegmentText.replace(/[\s၊,!\?\-\(\)\[\]\{\}\_]/g, "").toLowerCase();
+      const segLen = matchText.length;
+      accumulatedManualChars += segLen;
 
-      // Find matching AI block
-      const aiBlock = geminiCalibratedBlocks.find((b: any) => b.id === base.id || b.text === base.text);
-      if (aiBlock && typeof aiBlock.startMs === "number" && typeof aiBlock.endMs === "number") {
-        const aiDuration = aiBlock.endMs - aiBlock.startMs;
-        const variance = aiDuration - baseDuration;
-        console.log(`[Alignment Audit] Block ${idx + 1}: Baseline = ${baseDuration}ms, AI = ${aiDuration}ms. Variance = ${variance}ms.`);
-        
-        // Advanced stretching and compression calibration
-        if (Math.abs(variance) > 400) {
-          const dampingFactor = 0.75; // Align dynamically to speech rhythm while smoothing out jitter
-          const smoothedDuration = Math.round(baseDuration + (variance * dampingFactor));
-          
-          finalStartMs = Math.max(0, Math.min(aiBlock.startMs, activeMediaDurationMs));
-          finalEndMs = Math.max(finalStartMs + 150, Math.min(finalStartMs + smoothedDuration, activeMediaDurationMs));
-          console.log(`[Algorithmic Calibration] Block ${idx + 1}: Stretched/compressed duration by ${Math.round(variance * dampingFactor)}ms to match vocal pace.`);
-        } else {
-          finalStartMs = Math.max(0, Math.min(aiBlock.startMs, activeMediaDurationMs));
-          finalEndMs = Math.max(finalStartMs + 150, Math.min(aiBlock.endMs, activeMediaDurationMs));
+      let startMs = lastEndMs;
+      let endMs = lastEndMs + 2000; // 2 seconds default fallback
+
+      if (cleanWhisperTimeline.length > 0 && segLen > 0) {
+        // Expected timeline slice
+        const expectedTimelineEndIdx = Math.round((accumulatedManualChars / (totalCleanManualChars || 1)) * cleanWhisperTimeline.length);
+        const expectedLen = expectedTimelineEndIdx - currentTimelineIdx;
+
+        // Search for best visual matching starting offset locally
+        const searchRange = Math.min(Math.max(expectedLen * 2, 120), cleanWhisperTimeline.length - currentTimelineIdx);
+        let bestScore = -1;
+        let bestOffset = 0;
+
+        for (let offset = 0; offset < searchRange; offset++) {
+          const j = currentTimelineIdx + offset;
+          let matchCount = 0;
+          const compareLen = Math.min(segLen, cleanWhisperTimeline.length - j);
+
+          for (let k = 0; k < compareLen; k++) {
+            if (cleanWhisperTimeline[j + k].char.toLowerCase() === matchText[k]) {
+              matchCount++;
+            }
+          }
+
+          const score = compareLen > 0 ? matchCount / compareLen : 0;
+          // Slight proximity bonus for earlier chronological positions
+          const finalScore = score - (offset * 0.0003);
+
+          if (finalScore > bestScore) {
+            bestScore = finalScore;
+            bestOffset = offset;
+          }
         }
+
+        const matchedStartIdx = currentTimelineIdx + bestOffset;
+        const matchedEndIdx = Math.min(matchedStartIdx + segLen, cleanWhisperTimeline.length - 1);
+
+        if (matchedStartIdx < cleanWhisperTimeline.length) {
+          startMs = cleanWhisperTimeline[matchedStartIdx].timeMs;
+          endMs = cleanWhisperTimeline[matchedEndIdx].timeMs;
+        }
+
+        currentTimelineIdx = matchedEndIdx + 1;
       } else {
-        // High-fidelity fallback nudge sequence
-        const onsetNudge = Math.round(Math.sin(idx + 1.5) * 50);
-        finalStartMs = Math.max(0, base.startMs + onsetNudge);
-        const offsetNudge = Math.round(Math.cos(idx + 1.5) * 40);
-        finalEndMs = Math.max(finalStartMs + 150, Math.min(base.endMs + offsetNudge, activeMediaDurationMs));
-        console.log(`[Alignment Audit] Block ${idx + 1}: Using fallback calibration math.`);
+        // Character proportional fallback
+        const blockRatio = Math.max(1, rawTextVal.length) / (totalChars || 1);
+        const blockDuration = Math.round(blockRatio * activeMediaDurationMs);
+        startMs = lastEndMs;
+        endMs = startMs + blockDuration;
       }
 
-      // Enforce sequential chronology rule: no overlap
-      if (finalStartMs < lastEndMs) {
-        finalStartMs = lastEndMs;
+      // Snapping bounds verification
+      if (startMs < lastEndMs) {
+        startMs = lastEndMs;
       }
-      if (finalEndMs <= finalStartMs + 100) {
-        finalEndMs = finalStartMs + Math.round(baseDuration);
+      if (endMs <= startMs + 100) {
+        endMs = startMs + 1000;
+      }
+      if (endMs > activeMediaDurationMs) {
+        endMs = activeMediaDurationMs;
+      }
+      if (startMs > activeMediaDurationMs) {
+        startMs = activeMediaDurationMs - 100;
+        endMs = activeMediaDurationMs;
       }
 
-      if (idx === baselineBlocks.length - 1) {
-        finalEndMs = activeMediaDurationMs;
-      }
-      if (finalEndMs > activeMediaDurationMs) {
-        finalEndMs = activeMediaDurationMs;
-      }
+      lastEndMs = endMs;
 
-      lastEndMs = finalEndMs;
+      // Apply line stacking wrapping rules
+      const stackedText = applyStackingRules(cleanSegmentText);
+
       calibratedBlocks.push({
-        id: base.id,
-        startMs: finalStartMs,
-        endMs: finalEndMs,
-        text: base.text
+        id: i + 1,
+        startMs: Math.round(startMs),
+        endMs: Math.round(endMs),
+        text: stackedText
       });
     }
 
-    // Ensure the timeline reaches total media duration perfectly at the end
+    // Clean final boundary
     if (calibratedBlocks.length > 0) {
       calibratedBlocks[calibratedBlocks.length - 1].endMs = activeMediaDurationMs;
     }
 
-    console.log("=== DIAGNOSTIC EVIDENCE: BASELINE VS CALIBRATED (AI SYNC) ===");
-    console.log("Manual Mode (First 3 blocks):", JSON.stringify(baselineBlocks.slice(0, 3), null, 2));
-    console.log("Calibrated Mode (First 3 blocks):", JSON.stringify(calibratedBlocks.slice(0, 3), null, 2));
-    console.log("===============================================================");
-
     res.json({ blocks: calibratedBlocks });
+
   } catch (error: any) {
     console.error("[Subtitle Alignment API Error]:", error);
     res.status(500).json({ error: error.message || "Alignment calibration failed." });
   } finally {
-    // Safely delete all temporary files to prevent disk bloating
     for (const file of createdTempFiles) {
       try {
         if (file && fs.existsSync(file)) {

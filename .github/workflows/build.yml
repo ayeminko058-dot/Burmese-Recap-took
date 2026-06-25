@@ -29,21 +29,21 @@ jobs:
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
 
-      # 🌟 ၁။ အရင်ဆုံး မော်ဒယ်ဖိုင်ကို ဆွဲဒေါင်းပြီး models/ ထဲ ထည့်ထားမယ်
       - name: Download Whisper Model
         run: |
           mkdir -p models
           curl -L -o models/ggml-tiny.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin
 
-      # 🌟 ၂။ App ကို Build မယ်
       - name: Compile Application
         run: npm run build
 
-      # 🌟 ၃။ ဖိုင်ဆိုဒ်မပွအောင် အဓိကကျတဲ့ ရလဒ်နဲ့ မော်ဒယ်ဖိုင်ကိုပဲ ရွေးသိမ်းမယ်
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: production-app-package
           path: |
+            .next/
             dist/
+            build/
             models/ggml-tiny.bin
+
