@@ -125,7 +125,7 @@ export default function SettingsScreen({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 pb-28 space-y-4 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-4 pb-40 space-y-4 bg-[#070B13]">
         
         {/* Dedicated Gemini API key Settings section */}
         <div className="bg-[#1A2333]/90 border border-slate-800 rounded-2xl p-4 space-y-3.5">

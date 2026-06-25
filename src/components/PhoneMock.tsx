@@ -13,8 +13,6 @@ import TtsStudio from "./TtsStudio";
 import DownloadsScreen from "./DownloadsScreen";
 import SettingsScreen from "./SettingsScreen";
 import Translator from "./Translator";
-import TextRemovalStudio from "./TextRemovalStudio";
-import PosterMakerStudio from "./PosterMakerStudio";
 import { DownloadTask, AppNotification } from "../types";
 import { initializeAdMob } from "../utils/admob";
 
@@ -49,9 +47,9 @@ export default function PhoneMock({
   downloadedFiles,
   setDownloadedFiles
 }: PhoneMockProps) {
-  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker"
-  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker">("home");
-  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker">("home");
+  // Mobile app navigation state: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator"
+  const [currentScreen, setCurrentScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
+  const [lastScreen, setLastScreen] = useState<"home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator">("home");
   const [bottomTab, setBottomTab] = useState<"home" | "downloads" | "settings">("home");
   
   // Custom dialog overlay
@@ -178,7 +176,7 @@ export default function PhoneMock({
     };
   }, [currentScreen, lastScreen]);
 
-  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator" | "text_removal" | "poster_maker") => {
+  const handlePushScreen = (screen: "home" | "downloader" | "subtitle" | "tts" | "downloads" | "settings" | "translator") => {
     setLastScreen(currentScreen);
     setCurrentScreen(screen);
     // Sync bottom active bar indicator
@@ -401,47 +399,47 @@ export default function PhoneMock({
                   
                   {/* Column 1: Info, Stats, & Live Compliance */}
                   <div className="space-y-4 text-left">
-                    {/* Branded Banner & Modern Card */}
-                    <div className="bg-gradient-to-br from-[#121A2E]/80 to-[#0F172A]/80 border border-slate-800/80 p-5 rounded-3xl relative overflow-hidden backdrop-blur-sm shadow-xl">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/5 rounded-full blur-2xl pointer-events-none" />
-                      <span className="text-[9px] bg-blue-500/10 text-blue-400 py-1 px-2.5 rounded-full font-mono font-bold uppercase tracking-wider border border-blue-500/15">
+                    {/* Branded Banner & Modern Card (Compressed by 33%) */}
+                    <div className="bg-gradient-to-br from-[#121A2E]/85 to-[#0F172A]/85 border border-slate-800/80 px-4 py-3 rounded-2xl relative overflow-hidden backdrop-blur-sm shadow-xl animate-fade-in">
+                      <div className="absolute top-0 right-0 w-24 h-24 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
+                      <span className="text-[7.5px] bg-blue-500/15 text-blue-400 py-0.5 px-2 rounded-full font-mono font-bold uppercase tracking-wider border border-blue-500/15">
                         Premium AI Creator Studio
                       </span>
-                      <h1 className="text-xl font-extrabold tracking-tight text-white mt-3 leading-tight font-sans">
+                      <h1 className="text-xl font-extrabold tracking-tight text-white mt-1 leading-tight font-sans">
                         Burmese Recap Tool
                       </h1>
-                      <p className="text-[11px] text-slate-300 leading-relaxed mt-2">
+                      <p className="text-[11px] text-slate-400 leading-tight mt-1 font-normal">
                         The industry-first AI-assisted narration alignment workshop tailored for Myanmar language video producers. Automatically parses Unicode syllables, aligns voice-overs, and exports flawless subtitle streams.
                       </p>
-                      <div className="pt-3.5 flex items-center gap-4 text-[10px] text-slate-400">
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                          <span>Active Sandbox Mode</span>
+                      <div className="pt-2 flex items-center gap-2.5 text-[8px] text-slate-500">
+                        <div className="flex items-center gap-1 bg-[#0F172A]/90 px-1.5 py-0.5 rounded-md border border-slate-800/50">
+                          <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+                          <span>Active Sandbox</span>
                         </div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                        <div className="flex items-center gap-1 bg-[#0F172A]/90 px-1.5 py-0.5 rounded-md border border-slate-800/50">
+                          <span className="w-1 h-1 rounded-full bg-blue-500" />
                           <span>Chrome-optimized</span>
                         </div>
                       </div>
                     </div>
 
-                    {/* Device Compliance Widget */}
-                    <div className="bg-gradient-to-br from-[#1A2333]/75 to-[#121824]/75 border border-slate-800/80 p-4.5 rounded-3xl relative overflow-hidden shadow-md">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-2.5">Device Compliance & Integration</span>
-                      <div className="space-y-2.5">
-                        <div className="flex justify-between items-center bg-[#0F172A]/80 p-2.5 rounded-2xl border border-slate-800/50">
-                          <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${permissionGranted ? 'bg-emerald-500 shadow-sm shadow-emerald-500/30' : 'bg-rose-500'}`} />
-                            <span className="text-xs font-semibold text-slate-200">Foreground Sync Node</span>
+                    {/* Device Compliance Widget (Compressed by 33%) */}
+                    <div className="bg-gradient-to-br from-[#1A2333]/75 to-[#121824]/75 border border-slate-800/80 p-2.5 rounded-2xl relative overflow-hidden shadow-md mt-0">
+                      <span className="text-[7.5px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Device Compliance & Integration</span>
+                      <div className="space-y-1">
+                        <div className="flex justify-between items-center bg-[#0F172A]/80 py-1 px-2 rounded-xl border border-slate-800/50">
+                          <div className="flex items-center gap-1">
+                            <span className={`w-1 h-1 rounded-full ${permissionGranted ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                            <span className="text-[9px] font-bold text-slate-350">Foreground Sync Node</span>
                           </div>
-                          <span className="text-[9px] text-slate-400 select-none font-mono">SDK 34 (Android 14)</span>
+                          <span className="text-[6.5px] bg-slate-900 text-slate-400 px-1.5 py-0.5 rounded font-mono font-bold">SDK 34</span>
                         </div>
-                        <div className="flex justify-between items-center bg-[#0F172A]/80 p-2.5 rounded-2xl border border-slate-800/50">
-                          <div className="flex items-center gap-2">
-                            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500/30" />
-                            <span className="text-xs font-semibold text-slate-200">CapCut SRT Connector</span>
+                        <div className="flex justify-between items-center bg-[#0F172A]/80 py-1 px-2 rounded-xl border border-slate-800/50">
+                          <div className="flex items-center gap-1">
+                            <span className="w-1 h-1 rounded-full bg-emerald-500" />
+                            <span className="text-[9px] font-bold text-slate-350">CapCut SRT Connector</span>
                           </div>
-                          <span className="text-[9px] text-emerald-400 select-none font-mono font-semibold uppercase">Initialized</span>
+                          <span className="text-[6.5px] bg-emerald-950/40 text-emerald-400 px-1.5 py-0.5 rounded font-mono font-bold uppercase">Initialized</span>
                         </div>
                       </div>
                     </div>
@@ -549,53 +547,7 @@ export default function PhoneMock({
                       </div>
                     </div>
 
-                    {/* AI Text Removal Card */}
-                    <div
-                      onClick={() => handlePushScreen("text_removal")}
-                      className="bg-[#1C1015]/90 border-2 border-rose-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(244,63,94,0.06)] hover:shadow-[0_18px_32px_rgba(244,63,94,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-rose-950/40 active:scale-[0.985] group relative overflow-hidden text-left"
-                    >
-                      <div className="absolute top-0 right-0 w-20 h-20 bg-rose-500/10 rounded-full blur-xl pointer-events-none" />
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 bg-rose-650/20 text-rose-400 border border-rose-500/30 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-rose-500/10">
-                          <Trash2 className="w-4 h-4" />
-                        </div>
-                        <div className="text-left flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-rose-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
-                            <span>AI Text Removal</span>
-                            <span className="text-[7px] bg-rose-500/20 text-rose-300 border border-rose-500/25 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                              GEMINI API
-                            </span>
-                          </h3>
-                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
-                            စာတန်းထိုးများမှ မလိုအပ်သော အချိန်မှတ်များ၊ ကွင်းစကွင်းပိတ်များနှင့် အပိုစာသားများကို AI ဖြင့် အလိုအလျောက် သန့်စင်ပေးမည့်စနစ်။
-                          </p>
-                        </div>
-                      </div>
-                    </div>
 
-                    {/* Cinematic Poster Maker Card */}
-                    <div
-                      onClick={() => handlePushScreen("poster_maker")}
-                      className="bg-[#0B1A1E]/90 border-2 border-emerald-500/15 rounded-2xl p-3 cursor-pointer shadow-[0_12px_24px_rgba(20,184,166,0.06)] hover:shadow-[0_18px_32px_rgba(20,184,166,0.2)] transition-all duration-300 hover:scale-[1.015] hover:bg-emerald-950/40 active:scale-[0.985] group relative overflow-hidden text-left"
-                    >
-                      <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full blur-xl pointer-events-none" />
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 bg-emerald-650/20 text-emerald-400 border border-emerald-500/30 rounded-xl group-hover:scale-105 transition-transform shrink-0 shadow-sm shadow-emerald-500/10">
-                          <Image className="w-4 h-4" />
-                        </div>
-                        <div className="text-left flex-1 min-w-0">
-                          <h3 className="text-sm font-bold text-white tracking-wide group-hover:text-emerald-400 transition-colors flex items-center justify-between gap-1.5 font-sans">
-                            <span>Cinematic Poster Maker</span>
-                            <span className="text-[7px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/25 font-bold px-2 py-0.5 rounded-full uppercase font-mono tracking-wider whitespace-nowrap">
-                              GEMINI API
-                            </span>
-                          </h3>
-                          <p className="text-[11px] text-slate-300 font-normal leading-relaxed mt-1 line-clamp-2 h-8 overflow-hidden">
-                            YouTube (16:9) နှင့် TikTok/Shorts (9:16) အတွက် ဆွဲဆောင်မှုရှိသော ရုပ်ရှင်သုံးသပ်ချက် ပိုစတာများနှင့် thumbnail များကို ဖန်တီးပေးမည့်စနစ်။
-                          </p>
-                        </div>
-                      </div>
-                    </div>
 
                   </div>
 
@@ -625,6 +577,7 @@ export default function PhoneMock({
             <SubtitleStudio 
               onAddNotification={onAddNotification}
               onAddDownloadedFile={handleAddDownloadedFile}
+              isActive={currentScreen === "subtitle"}
             />
             </div>
 
@@ -632,6 +585,7 @@ export default function PhoneMock({
             <TtsStudio 
               onAddNotification={onAddNotification}
               onAddDownloadedFile={handleAddDownloadedFile}
+              isActive={currentScreen === "tts"}
             />
             </div>
 
@@ -651,26 +605,40 @@ export default function PhoneMock({
             />
             </div>
 
-            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "text_removal" ? "" : "hidden"}`}>
-            <TextRemovalStudio 
-              onAddNotification={onAddNotification}
-            />
-            </div>
 
-            <div className={`flex-1 min-h-0 h-full flex flex-col ${currentScreen === "poster_maker" ? "" : "hidden"}`}>
-            <PosterMakerStudio 
-              onAddNotification={onAddNotification}
-            />
-            </div>
           </div>
         </div>
       </div>
 
       {/* BOTTOM PERSISTENT REGION - Floating elegantly with Safe Area bottom spacing */}
-      <div className="absolute bottom-0 left-0 right-0 z-50 pointer-events-none flex flex-col items-center gap-3 px-4 pb-[calc(14px+env(safe-area-inset-bottom))] mb-[env(safe-area-inset-bottom)] select-none">
+      <div className="absolute bottom-0 left-0 right-0 z-50 pointer-events-none flex flex-col items-center gap-2 px-4 pb-[calc(14px+env(safe-area-inset-bottom))] mb-[env(safe-area-inset-bottom)] select-none">
 
-        {/* PREMIUM FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR */}
-        <div className="w-full max-w-sm bg-[#0D1321]/90 backdrop-blur-lg border border-slate-800/80 rounded-2xl pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.8)] py-3 px-6 flex items-center justify-between shrink-0">
+        {/* HIGH-FIDELITY ADMOB BANNER AD CONTAINER - STACKED LINEARLY ABOVE NAVIGATION */}
+        <div className="w-full max-w-sm bg-[#0D1321] border border-slate-800/80 rounded-xl pointer-events-auto shadow-[0_4px_20px_rgba(0,0,0,0.5)] p-2 flex items-center justify-between gap-3 text-left overflow-hidden relative group">
+          <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-[7.5px] bg-slate-800 text-slate-400 font-extrabold px-1.5 py-0.5 rounded border border-slate-700/50 uppercase font-mono tracking-wider shrink-0 select-none">
+              Ad
+            </span>
+            <div className="min-w-0">
+              <h4 className="text-[10px] font-bold text-slate-200 truncate leading-tight">
+                Upgrade to Creator Pro
+              </h4>
+              <p className="text-[8px] text-slate-400 truncate mt-0.5 leading-none">
+                Unlimited speed downloads, lossless PCM, & crystal clear Burmese voices.
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => handlePushScreen("settings")}
+            className="shrink-0 text-[8px] font-extrabold bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded-lg transition shadow-sm active:scale-95"
+          >
+            Get Pro
+          </button>
+        </div>
+
+        {/* PREMIUM FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR - RE-INDEXED WITH SOLID BACKGROUND */}
+        <div className="w-full max-w-sm bg-[#0D1321] border border-slate-800/80 rounded-2xl pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.8)] py-3 px-6 flex items-center justify-between shrink-0 z-50">
           <button
             onClick={() => handlePushScreen("home")}
             className={`flex-1 flex flex-col items-center gap-1.5 focus:outline-none transition-all duration-300 ${

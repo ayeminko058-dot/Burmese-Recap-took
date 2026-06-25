@@ -20,9 +20,10 @@ export const VOICE_MATRIX: VoiceOption[] = [
 interface TtsStudioProps {
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
   onAddDownloadedFile: (name: string, data: string, type: "srt" | "audio" | "video", audioUrl?: string) => void;
+  isActive?: boolean;
 }
 
-export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: TtsStudioProps) {
+export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isActive = true }: TtsStudioProps) {
   const [text, setText] = useState(
     "ပရိသတ်ကြီးခင်ဗျာ။ ယနေ့ တင်ဆက်ပေးမယ့် ဇာတ်ကားကတော့ နာမည်ကျော် မင်းသားကြီးရဲ့ ဂန္ထဝင် စွန့်စားခန်း ဇာတ်လမ်းတစ်ပုဒ်ပဲ ဖြစ်ပါတယ်။ နောက်ဆုံးအချိန်အထိ စိတ်လှုပ်ရှားစွာနဲ့ ကြည့်ရှုရမှာမို့ ဗီဒီယိုလေးကို Like and Subbed လုပ်ပေးခဲ့ကြပါဦး။"
   );
@@ -241,23 +242,50 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile }: Tt
     };
   }, [syncedAudioUrl]);
 
+  // Stop background audio if navigating away or unmounting
+  useEffect(() => {
+    if (!isActive && audioRef.current) {
+      try {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        setAudioPlayState(false);
+      } catch (e) {
+        console.warn("Error pausing tts audio on deactivation:", e);
+      }
+    }
+  }, [isActive]);
+
+  useEffect(() => {
+    return () => {
+      if (audioRef.current) {
+        try {
+          audioRef.current.pause();
+          audioRef.current.removeAttribute("src");
+          audioRef.current.load();
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+  }, []);
+
   return (
     <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="tts-studio">
-      <div className="p-3 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
+      <div className="p-2 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            <div className="p-1 rounded-lg bg-blue-500/10 text-blue-400">
+            <div className="p-0.5 rounded-md bg-blue-500/10 text-blue-400">
               <Volume2 className="w-4 h-4 animate-pulse" />
             </div>
             <div>
-              <h2 className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
-              <p className="text-[9px] text-slate-400">Ultra Long-form Myanmar Voice Engrave</p>
+              <h2 className="text-xs font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
+              <p className="text-[8px] text-slate-450">Ultra Long-form Myanmar Voice Engrave</p>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 pb-24 space-y-3 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-3 pb-36 space-y-3 bg-[#070B13]">
         {/* Voice setup */}
         <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
           <div className="flex items-center justify-between">

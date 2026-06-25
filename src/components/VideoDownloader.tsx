@@ -48,6 +48,7 @@ export default function VideoDownloader({
   const [srtSubtitles, setSrtSubtitles] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [backendStatusMsg, setBackendStatusMsg] = useState<string>("");
 
   // Drag and Drop interaction state
   const [isDragging, setIsDragging] = useState<boolean>(false);
@@ -306,91 +307,82 @@ export default function VideoDownloader({
     }
 
     setStatus("extracting_audio");
-    setProgress(15);
+    setProgress(5);
+    setBackendStatusMsg("Converting media stream to base64 payload...");
     setErrorMsg(null);
 
     try {
-      onAddNotification("Extracting Audio", "Parsing raw audio tracks using Web Audio graph...", "info");
+      onAddNotification("Uploading Track", "Initiating high-fidelity real-time pipeline to backend...", "info");
       
-      // Load standard array buffer
-      const arrayBuffer = await selectedFile.arrayBuffer();
+      const fileBase64 = await convertBlobToBase64(selectedFile);
       
-      // Create native Audio Context
-      const AudioCtxConstructor = window.AudioContext || (window as any).webkitAudioContext;
-      const audioCtx = new AudioCtxConstructor();
-
-      let originalBuffer: AudioBuffer;
-      try {
-        originalBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      } catch (decodeErr) {
-        throw new Error("Local audio decoding failed. Ensure this media contains a valid, non-corrupt sound track.");
-      }
-
-      setProgress(40);
-      setStatus("transcribing");
-      onAddNotification("Resampling Audio", "Downscaling sound stream to 16kHz mono PCM...", "info");
-
-      // Set target resample params
-      const targetRate = 16000;
-      const targetChannels = 1;
-      const duration = originalBuffer.duration;
-      const targetSamples = Math.round(duration * targetRate);
-
-      const offlineCtx = new OfflineAudioContext(targetChannels, targetSamples, targetRate);
-      const bufferSource = offlineCtx.createBufferSource();
-      bufferSource.buffer = originalBuffer;
-      bufferSource.connect(offlineCtx.destination);
-      bufferSource.start();
-
-      const resampledBuffer = await offlineCtx.startRendering();
-      const pcmMonoData = resampledBuffer.getChannelData(0);
-
-      // Close base context to free up memory
-      await audioCtx.close();
-
-      setProgress(60);
-
-      // Convert Float32 Mono samples to standard 16-bit WAV
-      const wavBlob = encodeMonoFloat32ToWav(pcmMonoData, targetRate);
-      
-      // Convert to Base64
-      const wavBase64 = await convertBlobToBase64(wavBlob);
-      
-      setProgress(75);
-      onAddNotification("Uploading to Gemini", "Transcribing speech on-device through Gemini API...", "info");
-
-      // Post payload to Express route proxy
-      const response = await fetch(getApiUrl("/api/transcribe"), {
+      const response = await fetch(getApiUrl("/api/subtitle/generate-stream"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-Gemini-API-Key": savedKey,
         },
         body: JSON.stringify({
-          audioData: wavBase64,
-          mimeType: "audio/wav",
+          fileBase64,
+          fileName: selectedFile.name,
+          mimeType: selectedFile.type,
           format: formatSelection,
         }),
       });
 
-      const contentType = response.headers.get("content-type");
-      let data: any = {};
-      
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json().catch(() => ({}));
-      } else {
-        const rawText = await response.text().catch(() => "");
-        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
-          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
-        }
-        throw new Error(rawText.substring(0, 100) || "Transcription server error.");
-      }
-
       if (!response.ok) {
-        throw new Error(data.error || "Failed to compile transcription.");
+        const errorText = await response.text();
+        throw new Error(errorText || `Server responded with status ${response.status}`);
       }
 
-      const resultText = data.output || "";
+      const reader = response.body?.getReader();
+      if (!reader) {
+        throw new Error("Streaming transmission not supported by your browser environment.");
+      }
+
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let resultText = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+          try {
+            const payload = JSON.parse(trimmed.substring(6));
+            const serverProgress = typeof payload.progress === "number" ? payload.progress : 0;
+            const serverMsg = payload.message || "";
+
+            setProgress(serverProgress);
+            setBackendStatusMsg(serverMsg);
+
+            // Dynamically adjust status to reflect backend progress perfectly
+            if (serverProgress < 50) {
+              setStatus("extracting_audio");
+            } else if (serverProgress >= 50 && serverProgress < 100) {
+              setStatus("transcribing");
+            }
+
+            if (serverProgress === 100 && payload.output) {
+              resultText = payload.output;
+            }
+          } catch (jsonErr) {
+            console.warn("Failed to parse streamed SSE event line:", trimmed, jsonErr);
+          }
+        }
+      }
+
+      if (!resultText) {
+        throw new Error("No transcription text returned from the Gemini pipeline.");
+      }
 
       // Intercept with Interstitial Ad before displaying results to user
       triggerInterstitialAd(
@@ -425,6 +417,7 @@ export default function VideoDownloader({
 
           setProgress(100);
           setStatus("completed");
+          setBackendStatusMsg("Completed successfully!");
           onAddNotification("Transcription Finished", "Successfully compiled audio text track.", "success");
 
           // Save into Downloads History
@@ -443,7 +436,7 @@ export default function VideoDownloader({
     } catch (err: any) {
       console.error(err);
       setStatus("error");
-      setErrorMsg(err.message || "Decoding error during local PCM audio stream conversion.");
+      setErrorMsg(err.message || "Error occurred during remote pipeline transmission.");
       onAddNotification("Transcription Failed", err.message || "Failed to process audio matrix.", "warning");
     }
   };
@@ -509,37 +502,37 @@ export default function VideoDownloader({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-4 md:px-6 py-5 pb-28 select-none text-left space-y-5" id="offline-transcription-studio">
+    <div className="flex-1 overflow-y-auto px-2.5 py-3 pb-36 select-none text-left space-y-3" id="offline-transcription-studio">
       
-      {/* Header and Branding (Material 3 Card) */}
-      <div className="bg-gradient-to-br from-slate-900 via-indigo-950/45 to-slate-950 p-5 rounded-3xl border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+      {/* Header and Branding (Material 3 Card) - Compressed by 33% */}
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-950/45 to-slate-950 p-3 rounded-2xl border border-indigo-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
         <div className="flex items-center gap-2">
-          <div className="p-2 bg-indigo-500/15 text-indigo-400 rounded-2xl border border-indigo-500/20">
-            <Mic className="w-5 h-5 text-indigo-400 animate-pulse" />
+          <div className="p-1.5 bg-indigo-500/15 text-indigo-400 rounded-xl border border-indigo-500/20">
+            <Mic className="w-4 h-4 text-indigo-400 animate-pulse" />
           </div>
           <div>
-            <h1 className="text-base font-bold text-white tracking-wide">
+            <h1 className="text-xs font-bold text-white tracking-wide">
               Voice to Text (Gemini Edition)
             </h1>
-            <p className="text-[10px] text-slate-300 mt-0.5">
+            <p className="text-[8.5px] text-slate-450 mt-0.5">
               Secure Direct Processing • Sub Rip Caption Aligner & Transcription Panel
             </p>
           </div>
         </div>
         
-        <div className="flex items-center gap-1.5 bg-indigo-500/10 text-indigo-400 text-[10px] uppercase font-mono py-1 px-3.5 rounded-full border border-indigo-500/20">
-          <ShieldCheck className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-1 bg-indigo-500/10 text-indigo-400 text-[8px] uppercase font-mono py-0.5 px-2 rounded-full border border-indigo-500/20">
+          <ShieldCheck className="w-3 h-3" />
           <span>Lossless PCM Resampling</span>
         </div>
       </div>
 
-      {/* Required Banner Warning */}
+      {/* Required Banner Warning - Compressed */}
       {!apiKeySet && (
-        <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-2xl text-xs text-rose-350 flex items-start gap-3 animate-fade-in">
-          <AlertCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />
+        <div className="bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl text-[10px] text-rose-350 flex items-start gap-2 animate-fade-in">
+          <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
           <div>
             <p className="font-extrabold text-rose-400">Gemini API Key Required</p>
-            <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+            <p className="text-[8.5px] text-slate-400 mt-0.5 leading-relaxed">
               This app transcudes and performs audio processing locally on your device before translating and sending standard audio frames to Google's Gemini models for speech-to-text. Please provide your credential below.
             </p>
           </div>
@@ -762,13 +755,17 @@ export default function VideoDownloader({
                 {status === "extracting_audio" && (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-amber-500 shrink-0" />
-                    <span className="text-amber-200">[Step 1/3]: Decoding array buffers and downsampling PCM matrix...</span>
+                    <span className="text-amber-200">
+                      {backendStatusMsg || "[Step 1/3]: Decoding array buffers and downsampling PCM matrix..."}
+                    </span>
                   </>
                 )}
                 {status === "transcribing" && (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin text-indigo-400 shrink-0" />
-                    <span className="text-indigo-200">[Step 2/3]: Uploading audio stream securely to Gemini API model...</span>
+                    <span className="text-indigo-200">
+                      {backendStatusMsg || "[Step 2/3]: Uploading audio stream securely to Gemini API model..."}
+                    </span>
                   </>
                 )}
                 {status === "completed" && (

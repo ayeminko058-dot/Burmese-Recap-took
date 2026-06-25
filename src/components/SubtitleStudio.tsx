@@ -5,6 +5,8 @@ import {
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { triggerInterstitialAd } from "../utils/admob";
 import { SubtitleBlock } from "../types";
+import { performProportionalAutoAlignment } from "../utils/burmeseProcessor";
+import { getApiUrl } from "../utils/api";
 
 // ==========================================
 // 5. ENCAPSULATED BURMESE SUBTITLE ENGINE
@@ -253,6 +255,7 @@ const BurmeseSubtitleEngine = {
 interface SubtitleStudioProps {
   onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void;
   onAddDownloadedFile: (name: string, data: string, type: "srt" | "audio" | "video") => void;
+  isActive?: boolean;
 }
 
 const preloadedSubtitles = [
@@ -286,7 +289,7 @@ const preloadedSubtitles = [
   }
 ];
 
-export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile }: SubtitleStudioProps) {
+export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile, isActive = true }: SubtitleStudioProps) {
   // States
   const [script, setScript] = useState(
     "ယခုတစ်ခေါက် တင်ဆက်ပေးမယ့် လူသတ်ကွင်း ဇာတ်လမ်းဟာ အင်္ဂလန်နိုင်ငံ အလယ်ပိုင်းဒေသမှာ အမှန်တကယ် ဖြစ်ပွားခဲ့တဲ့ ဖြစ်ရပ်ဆန်း တစ်ခုပဲ ဖြစ်ပါတယ်။ မြန်မာနိုင်ငံ၏ သတင်းနည်းပညာကဏ္ဍ အလွန်လျင်မြန်စွာတိုးတက်လာပုံပဲဖြစ်ပါတယ်။"
@@ -312,16 +315,33 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
   const [mediaFileSize, setMediaFileSize] = useState("14.22 MB");
   const [mediaObjectUrl, setMediaObjectUrl] = useState<string | null>(null);
   const [mediaDuration, setMediaDuration] = useState<number>(0); // dynamic media playback duration
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+
+  // Global settings API key sync state
+  const [geminiApiKey, setGeminiApiKey] = useState<string>(() => localStorage.getItem("gemini_api_key") || "");
 
   // Simulation play state
   const [isSimulating, setIsSimulating] = useState(false);
   const [simulationProgressMs, setSimulationProgressMs] = useState(0);
   const [justCopied, setJustCopied] = useState(false);
 
+  // Alignment engine states
+  const [alignmentMode, setAlignmentMode] = useState<"manual" | "ai_sync">("manual");
+  const [isAligning, setIsAligning] = useState(false);
+  const [aligningStatus, setAligningStatus] = useState("");
+  const [aligningProgress, setAligningProgress] = useState(0);
+
   // Refs
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const simulationIntervalRef = useRef<any>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const mediaObjectUrlRef = useRef<string | null>(null);
+
+  // Sync the mutable ref with state to allow access inside empty-dependency unmount hooks
+  useEffect(() => {
+    mediaObjectUrlRef.current = mediaObjectUrl;
+  }, [mediaObjectUrl]);
 
   // Stats
   const totalBlocks = blocks.length;
@@ -329,20 +349,77 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
   const currentTotalDuration = mediaDuration > 0 ? mediaDuration * 1000 : 60000;
   const avgDurationPerBlock = totalBlocks > 0 ? Math.round(currentTotalDuration / totalBlocks) : 0;
 
-  // Cleanup simulation interval
+  // Listen to storage events to keep API key reactively synchronized across workspaces
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setGeminiApiKey(localStorage.getItem("gemini_api_key") || "");
+    };
+    window.addEventListener("storage", handleStorageChange);
+    return () => {
+      window.removeEventListener("storage", handleStorageChange);
+    };
+  }, []);
+
+  // Aggressive memory and playback cleanup when deactivated or unmounted
   useEffect(() => {
     return () => {
       if (simulationIntervalRef.current) {
         clearInterval(simulationIntervalRef.current);
+        simulationIntervalRef.current = null;
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute("src");
+          videoRef.current.load();
+        } catch (err) {
+          console.warn("Cleanup error for video player:", err);
+        }
+      }
+      if (mediaObjectUrlRef.current) {
+        try {
+          URL.revokeObjectURL(mediaObjectUrlRef.current);
+        } catch (revokeErr) {
+          console.warn("Error revoking media object URL on unmount:", revokeErr);
+        }
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!isActive) {
+      stopSimulation();
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      if (videoRef.current) {
+        try {
+          videoRef.current.pause();
+          videoRef.current.removeAttribute("src");
+          videoRef.current.load();
+        } catch (err) {
+          console.warn("Deactivation error for video player:", err);
+        }
+      }
+      if (mediaObjectUrlRef.current) {
+        try {
+          URL.revokeObjectURL(mediaObjectUrlRef.current);
+        } catch (revokeErr) {
+          console.warn("Error revoking media object URL on deactivation:", revokeErr);
+        }
+      }
+    }
+  }, [isActive]);
 
   // 1. FILE PICKING HANDLER
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setMediaFile(file);
     const name = file.name;
     const mbSize = (file.size / (1024 * 1024)).toFixed(2);
     setMediaFileName(name);
@@ -358,6 +435,26 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
     stopSimulation();
     
     onAddNotification("Media Stream Loaded", `Incorporated: ${name} (${mbSize} MB)`, "success");
+  };
+
+  const handleClearMedia = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (mediaObjectUrl) {
+      URL.revokeObjectURL(mediaObjectUrl);
+    }
+    setMediaFile(null);
+    setMediaFileName("captured_news_media.mp4");
+    setMediaFileSize("0 MB");
+    setMediaObjectUrl(null);
+    setMediaDuration(0);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+    stopSimulation();
+    onAddNotification("Media Stream Cleared", "The target media reference was securely wiped.", "info");
   };
 
   // Get runtime duration
@@ -381,8 +478,9 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
     
     const segments: string[] = [];
     let currentSegment = "";
+    let i = 0;
     
-    for (let i = 0; i < rawText.length; i++) {
+    while (i < rawText.length) {
       const char = rawText[i];
       if (char === ".") {
         // [ . ] English Full Stop is completely stripped out, deleted and omitted from the final subtitle text string.
@@ -390,15 +488,27 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
           segments.push(currentSegment.trim());
         }
         currentSegment = "";
+        i++;
       } else if (char === "။") {
-        // Burmese Puk-ma remains unmodified and intact inside its segment block!
-        currentSegment += char;
-        if (currentSegment.trim()) {
-          segments.push(currentSegment.trim());
+        // Look ahead for double Burmese full stop
+        if (i + 1 < rawText.length && rawText[i + 1] === "။") {
+          currentSegment += "။။";
+          if (currentSegment.trim()) {
+            segments.push(currentSegment.trim());
+          }
+          currentSegment = "";
+          i += 2;
+        } else {
+          currentSegment += "။";
+          if (currentSegment.trim()) {
+            segments.push(currentSegment.trim());
+          }
+          currentSegment = "";
+          i++;
         }
-        currentSegment = "";
       } else {
         currentSegment += char;
+        i++;
       }
     }
     if (currentSegment.trim()) {
@@ -426,44 +536,140 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
       return;
     }
 
-    // Exact total character count across the processed and cleaned non-empty array
-    const jointChars = segments.reduce((sum, s) => sum + s.length, 0);
-
-    let progressAccumulatorMs = 0;
-    const alignedBlocks = segments.map((seg, idx) => {
-      const blockLength = seg.length;
-      // Proportional Duration algorithm: Block Duration = (Individual Block Char Count / Total Chars) * Total media duration
-      const blockPeriod = jointChars > 0 
-        ? (blockLength / jointChars) * activeMediaDurationMs 
-        : activeMediaDurationMs / segments.length;
-
-      const startMs = progressAccumulatorMs;
-      // Gapless cascade - endMs equals startOfNext. snap last block exactly to duration
-      let endMs = startMs + Math.round(blockPeriod);
-      if (idx === segments.length - 1) {
-        endMs = activeMediaDurationMs;
-      }
-
-      progressAccumulatorMs = endMs;
-
-      return {
+    if (alignmentMode === "manual") {
+      // IF 'Manual' IS ACTIVE: Use the legacy purely mathematical character-proportional timing slicing engine
+      const durationSec = activeMediaDurationMs / 1000;
+      const results = performProportionalAutoAlignment(rawText, durationSec);
+      
+      const alignedBlocks = results.map((r, idx) => ({
         id: idx + 1,
-        startMs,
-        endMs,
-        rawText: seg,
-        displayText: BurmeseSubtitleEngine.applyStackingRules(seg) // format beautiful line stacks
-      };
-    });
+        startMs: r.startMs,
+        endMs: r.endMs,
+        rawText: segments[idx] || r.text.replace(/\n/g, " "),
+        displayText: r.text
+      }));
 
-    setBlocks(alignedBlocks);
-    setSimulationProgressMs(0);
-    stopSimulation();
-    
-    onAddNotification(
-      "Auto-Alignment Sync Completed", 
-      `Compiled ${alignedBlocks.length} subtitle slices gaplessly across ${Math.round(activeMediaDurationMs / 1000)} seconds.`, 
-      "success"
-    );
+      setBlocks(alignedBlocks);
+      setSimulationProgressMs(0);
+      stopSimulation();
+      
+      onAddNotification(
+        "Proportional Alignment Completed", 
+        `Compiled ${alignedBlocks.length} subtitle slices gaplessly across ${Math.round(activeMediaDurationMs / 1000)} seconds.`, 
+        "success"
+      );
+    } else {
+      // IF 'AI Sync' IS ACTIVE: Run the advanced voice forced-alignment module.
+      setIsAligning(true);
+      setAligningProgress(15);
+      setAligningStatus("Preparing multi-modal speech buffers...");
+
+      const alignSubtitles = async () => {
+        try {
+          const savedKey = localStorage.getItem("gemini_api_key") || "";
+          if (!savedKey) {
+            throw new Error("Gemini API Key is required for AI Sync. Please enter a valid key below first.");
+          }
+          if (!mediaFile) {
+            throw new Error("No target media uploaded. Please click on 'Target Media Stream' to select a video/audio file first.");
+          }
+          
+          setAligningProgress(35);
+          setAligningStatus("Uploading media stream and sentence segments to Gemini...");
+
+          const formData = new FormData();
+          formData.append("file", mediaFile);
+          formData.append("text", rawText);
+          formData.append("segments", JSON.stringify(segments));
+          formData.append("activeMediaDurationMs", activeMediaDurationMs.toString());
+          formData.append("alignmentMode", "ai_sync");
+
+          if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+          }
+          abortControllerRef.current = new AbortController();
+
+          setAligningProgress(60);
+          setAligningStatus("Calibrating vocal phonetic waveforms via Gemini Speech Model...");
+
+          let isWatchdogTriggered = false;
+          const watchdogTimeout = setTimeout(() => {
+            if (abortControllerRef.current) {
+              isWatchdogTriggered = true;
+              console.warn("[Watchdog] Alignment has been hanging at 60% for more than 45 seconds. Aborting request.");
+              abortControllerRef.current.abort();
+            }
+          }, 45000);
+
+          let response;
+          try {
+            response = await fetch(getApiUrl("/api/subtitle/align"), {
+              method: "POST",
+              headers: {
+                "X-Gemini-API-Key": savedKey
+              },
+              body: formData,
+              signal: abortControllerRef.current.signal
+            });
+          } catch (fetchErr: any) {
+            if (isWatchdogTriggered) {
+              throw new Error("Vocal phonetic waveform calibration timed out (45s). Please try again or use manual mode.");
+            }
+            throw fetchErr;
+          } finally {
+            clearTimeout(watchdogTimeout);
+          }
+
+          if (!response.ok) {
+            const errBody = await response.json().catch(() => ({}));
+            throw new Error(errBody.error || `Server responded with status ${response.status}`);
+          }
+
+          setAligningProgress(85);
+          setAligningStatus("Validating chronological sequences and rendering final subtitles...");
+
+          const data = await response.json();
+          if (!data.blocks || !Array.isArray(data.blocks)) {
+            throw new Error("Invalid response format from subtitle alignment server.");
+          }
+
+          const alignedBlocks = data.blocks.map((block: any) => ({
+            id: block.id,
+            startMs: block.startMs,
+            endMs: block.endMs,
+            rawText: block.text,
+            displayText: BurmeseSubtitleEngine.applyStackingRules(block.text)
+          }));
+
+          setBlocks(alignedBlocks);
+          setSimulationProgressMs(0);
+          stopSimulation();
+          setIsAligning(false);
+
+          onAddNotification(
+            "AI Forced Alignment Successful", 
+            `Snapped ${alignedBlocks.length} subtitle syllable boundaries dynamically via the backend Hybrid Calibration loop.`, 
+            "success"
+          );
+        } catch (error: any) {
+          if (error.name === "AbortError") {
+            console.log("[AI Sync] Alignment operation aborted by user.");
+            onAddNotification("Alignment Cancelled", "The calibration process was stopped.", "info");
+          } else {
+            console.error("[AI Alignment Error]:", error);
+            onAddNotification(
+              "AI Sync Failed", 
+              error.message || "Failed to align subtitles. Confirm key credentials and media stream.", 
+              "warning"
+            );
+          }
+        } finally {
+          setIsAligning(false);
+        }
+      };
+
+      alignSubtitles();
+    }
   };
 
   // Reset workspace
@@ -672,35 +878,35 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
 
   return (
     <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="subtitle-studio-refactored">
-      {/* Mini Title bar strip-down branding compliant */}
-      <div className="p-3 border-b border-[#1E293B] bg-[#0D1321] shrink-0 flex items-center justify-between">
+      {/* Mini Title bar strip-down branding compliant - Compressed by 33% */}
+      <div className="p-2 border-b border-[#1E293B] bg-[#0D1321] shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
-          <div className="p-1 rounded-lg bg-cyan-500/10 text-cyan-400">
+          <div className="p-0.5 rounded-md bg-cyan-500/10 text-cyan-400">
             <Layout className="w-4 h-4" />
           </div>
           <div>
-            <h2 className="text-xs sm:text-sm font-semibold tracking-wide text-slate-100">Subtitle Aligner Studio</h2>
-            <p className="text-[9px] text-slate-400">Precision Punctuation Aligner & Stack Formatter</p>
+            <h2 className="text-xs font-semibold tracking-wide text-slate-100">Subtitle Aligner Studio</h2>
+            <p className="text-[8px] text-slate-450">Precision Punctuation Aligner & Stack Formatter</p>
           </div>
         </div>
         <button
           onClick={handleResetWorkspace}
-          className="text-[8px] bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-305 py-1 px-2.5 rounded-lg font-medium transition"
+          className="text-[8px] bg-slate-900 border border-slate-800 hover:bg-slate-800 text-slate-350 py-0.5 px-2.5 rounded-lg font-medium transition"
         >
           Reset Demo Blocks
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 pb-24 space-y-3 bg-[#070B13]">
+      <div className="flex-1 overflow-y-auto p-2.5 pb-36 space-y-2.5 bg-[#070B13]">
         {/* Main Grid View */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 pb-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2.5 pb-4">
           
           {/* Left Columns (5 Cols) */}
-          <div className="lg:col-span-12 xl:col-span-5 space-y-3">
+          <div className="lg:col-span-12 xl:col-span-5 space-y-2.5">
             
-            {/* 1. Target Media Stream */}
-            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5 relative overflow-hidden">
-              <h3 className="text-[10px] font-bold text-slate-205 flex items-center gap-1.5 uppercase tracking-wider">
+            {/* 1. Target Media Stream - Compressed */}
+            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-2.5 space-y-1.5 relative overflow-hidden">
+              <h3 className="text-[9.5px] font-bold text-slate-205 flex items-center gap-1.5 uppercase tracking-wider">
                 <span className="text-cyan-500 font-bold">◆</span>
                 1. Target Media Stream
               </h3>
@@ -716,18 +922,32 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                   className="hidden" 
                   onChange={handleFileChange} 
                 />
-                <div className="flex items-center justify-center gap-2">
-                  <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400">
-                    <Upload className="w-3.5 h-3.5" />
+                <div className="flex items-center justify-between gap-2 w-full">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="p-1.5 rounded-lg bg-cyan-500/10 text-cyan-400 shrink-0">
+                      <Upload className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="text-left min-w-0">
+                      <p className="text-xs font-semibold text-slate-300 truncate max-w-[150px] sm:max-w-[200px]">
+                        {mediaFileName}
+                      </p>
+                      <p className="text-[9px] text-slate-450">
+                        Size: {mediaFileSize} — Click to load file
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-left">
-                    <p className="text-xs font-semibold text-slate-305 truncate max-w-[200px]">
-                      {mediaFileName}
-                    </p>
-                    <p className="text-[9px] text-slate-400">
-                      Size: {mediaFileSize} — Click to load file
-                    </p>
-                  </div>
+                  {(mediaFile || mediaObjectUrl) && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleClearMedia();
+                      }}
+                      className="py-1 px-2.5 bg-rose-600/20 hover:bg-rose-600/35 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-extrabold text-[9px] rounded-lg transition-all shadow-sm shrink-0 flex items-center gap-1 active:scale-95"
+                    >
+                      Cancel Upload
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -746,36 +966,36 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
               )}
             </div>
 
-            {/* Subtitle Track Analytics Panel - Clean Display Segment */}
-            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
-              <h3 className="text-[10px] font-semibold text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
+            {/* Subtitle Track Analytics Panel - Clean Display Segment (Compressed) */}
+            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-2.5 space-y-1.5">
+              <h3 className="text-[9.5px] font-semibold text-slate-300 uppercase tracking-widest flex items-center gap-1.5">
                 <span className="text-emerald-500 font-bold">◆</span>
                 Subtitle Track Analytics Panel
               </h3>
               <div className="grid grid-cols-3 gap-1.5">
-                <div className="bg-[#0D1321] border border-slate-800 p-2 rounded-lg text-center">
+                <div className="bg-[#0D1321] border border-slate-800 p-1.5 rounded-lg text-center">
                   <span className="text-[8px] text-slate-500 uppercase block font-semibold">Total Blocks</span>
-                  <span className="text-xs sm:text-sm font-bold text-slate-200 mt-0.5 block">{totalBlocks}</span>
+                  <span className="text-xs font-bold text-slate-200 mt-0.5 block">{totalBlocks}</span>
                 </div>
-                <div className="bg-[#0D1321] border border-slate-800 p-2 rounded-lg text-center">
+                <div className="bg-[#0D1321] border border-slate-800 p-1.5 rounded-lg text-center">
                   <span className="text-[8px] text-slate-500 uppercase block font-semibold">Chars Count</span>
-                  <span className="text-xs sm:text-sm font-bold text-slate-100 mt-0.5 block">{totalChars}</span>
+                  <span className="text-xs font-bold text-slate-100 mt-0.5 block">{totalChars}</span>
                 </div>
-                <div className="bg-[#0D1321] border border-slate-800 p-2 rounded-lg text-center">
+                <div className="bg-[#0D1321] border border-slate-800 p-1.5 rounded-lg text-center">
                   <span className="text-[8px] text-slate-500 uppercase block font-semibold">Avg Millis</span>
-                  <span className="text-xs sm:text-sm font-bold text-cyan-400 mt-0.5 block font-mono">{avgDurationPerBlock} ms</span>
+                  <span className="text-xs font-bold text-cyan-400 mt-0.5 block font-mono">{avgDurationPerBlock} ms</span>
                 </div>
               </div>
             </div>
 
-            {/* 3. Primary Translation Script Area */}
-            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2 flex flex-col justify-between">
+            {/* 3. Primary Translation Script Area - Compressed */}
+            <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-2.5 space-y-1.5 flex flex-col justify-between">
               <div>
-                <h3 className="text-[10px] font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                <h3 className="text-[9.5px] font-bold text-slate-200 uppercase tracking-wider flex items-center gap-1.5 mb-0.5">
                   <span className="text-cyan-500">■</span>
                   3. Primary Translation Script
                 </h3>
-                <p className="text-[9px] text-slate-400 leading-normal mb-2">
+                <p className="text-[8.5px] text-slate-450 leading-normal mb-1.5">
                   Segments blocks instantly by punctuation: Burmese [ ။ ] remains intact; English [ . ] is stripped.
                 </p>
                 <textarea
@@ -784,23 +1004,78 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
                   value={script}
                   onChange={(e) => setScript(e.target.value)}
                   placeholder="Type or paste Burmese transcript sentences separated by [ . ] or [ ။ ] ...."
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-250 rounded-lg p-2.5 focus:outline-none focus:border-cyan-500 transition-colors leading-relaxed placeholder-slate-500 font-sans resize-none"
+                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-250 rounded-lg p-2 focus:outline-none focus:border-cyan-500 transition-colors leading-relaxed placeholder-slate-500 font-sans resize-none"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-1.5 mt-2">
+              {/* Sleek Micro-sized Toggle Selector Pill-switch */}
+              <div className="flex items-center justify-between bg-[#0D1321] border border-[#1E293B] p-1 rounded-lg">
+                <span className="text-[8.5px] font-bold text-slate-400 pl-1">Alignment Mode:</span>
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setAlignmentMode("manual")}
+                    className={`text-[8px] font-extrabold px-2 py-0.5 rounded transition-all ${
+                      alignmentMode === "manual"
+                        ? "bg-cyan-600 text-white shadow-sm font-bold"
+                        : "text-slate-500 hover:text-slate-300 font-normal"
+                    }`}
+                  >
+                    Manual
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAlignmentMode("ai_sync")}
+                    className={`text-[8px] font-extrabold px-2 py-0.5 rounded transition-all flex items-center gap-0.5 ${
+                      alignmentMode === "ai_sync"
+                        ? "bg-purple-600 text-white shadow-sm font-bold"
+                        : "text-slate-500 hover:text-slate-300 font-normal"
+                    }`}
+                  >
+                    <Sparkles className="w-2.5 h-2.5 text-purple-300" />
+                    AI Sync
+                  </button>
+                </div>
+              </div>
+
+              {/* Inline Gemini API Key configuration input field */}
+              {alignmentMode === "ai_sync" && !geminiApiKey && (
+                <div className="bg-purple-950/40 border border-purple-500/20 p-2 rounded-lg space-y-1 relative overflow-hidden animate-fade-in mt-1">
+                  <div className="absolute top-0 right-0 w-16 h-16 bg-purple-500/5 rounded-full blur-xl pointer-events-none" />
+                  <p className="text-[9px] font-bold text-purple-300 flex items-center gap-1 uppercase tracking-wide select-none">
+                    <Sparkles className="w-2.5 h-2.5" />
+                    Enter Gemini API Key to unlock AI Sync:
+                  </p>
+                  <input
+                    type="password"
+                    placeholder="AIzaSy..."
+                    onChange={(e) => {
+                      const val = e.target.value.trim();
+                      if (val) {
+                        localStorage.setItem("gemini_api_key", val);
+                        setGeminiApiKey(val);
+                        window.dispatchEvent(new Event("storage"));
+                        onAddNotification("API Key Loaded", "Gemini key registered and synchronized globally.", "success");
+                      }
+                    }}
+                    className="w-full bg-[#0D1321] border border-purple-500/30 text-[10px] text-purple-100 rounded px-2 py-1 focus:outline-none focus:border-purple-500 font-mono"
+                  />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-1.5 mt-1">
                 <button
                   type="button"
                   onClick={handleAutoAlignment}
-                  className="py-2 px-2.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[10px] rounded-lg shadow-md transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
+                  className="py-1.5 px-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-[9px] rounded-lg shadow-md transition-all flex items-center justify-center gap-1 active:scale-[0.98]"
                 >
-                  <Sparkles className="w-3.5 h-3.5" />
+                  <Sparkles className="w-3 h-3" />
                   <span>Auto-Align Timeline</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setScript("")}
-                  className="py-2 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[10px] rounded-lg transition-all"
+                  className="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-[9px] rounded-lg transition-all"
                 >
                   Clear Script
                 </button>
@@ -1055,6 +1330,57 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile 
 
         </div>
       </div>
+
+      {/* Sleek Glassmorphic VAD / AI forced alignment active overlay */}
+      {isAligning && (
+        <div className="absolute inset-0 z-50 bg-[#070A13]/90 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-fade-in text-left">
+          <div className="w-full max-w-sm bg-[#0D1321]/95 border border-purple-500/30 p-5 rounded-2xl shadow-2xl space-y-4 relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-24 h-24 bg-purple-500/10 rounded-full blur-xl pointer-events-none animate-pulse" />
+            
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-xl animate-bounce">
+                <Sparkles className="w-5 h-5 text-purple-400" />
+              </div>
+              <div>
+                <h3 className="text-xs font-extrabold text-white uppercase tracking-wider">AI Voice Forced Alignment</h3>
+                <p className="text-[9px] text-slate-400 font-mono">Status: ACTIVE SYNC NODE</p>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex justify-between items-center text-[9px] font-semibold text-slate-350">
+                <span className="truncate max-w-[200px]">{aligningStatus}</span>
+                <span className="font-mono text-purple-400 font-bold">{aligningProgress}%</span>
+              </div>
+              {/* Progress track */}
+              <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800">
+                <div 
+                  className="bg-gradient-to-r from-purple-500 via-pink-500 to-purple-600 h-full rounded-full transition-all duration-300 shadow-sm shadow-purple-500/50"
+                  style={{ width: `${aligningProgress}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Voice stream parameters mockup visualizer */}
+            <div className="bg-black/40 border border-slate-800/80 p-2.5 rounded-xl flex items-center justify-center gap-[2px] h-9 select-none">
+              {Array.from({ length: 42 }).map((_, idx) => {
+                const height = 4 + Math.sin(idx + Date.now() * 0.1) * (14 + (idx % 3) * 4);
+                return (
+                  <div 
+                    key={idx}
+                    className="w-[2px] bg-gradient-to-t from-purple-500 to-pink-500 rounded-full animate-pulse"
+                    style={{ height: `${Math.min(26, Math.max(4, height))}px` }}
+                  />
+                );
+              })}
+            </div>
+
+            <p className="text-[9px] text-slate-400 leading-relaxed font-normal">
+              Analyzing audio waveform peaks sequentially to match Burmese transcript syllables. Timestamps are snapped dynamically to speech envelopes while keeping manual block structures intact.
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -152,19 +152,19 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
   };
 
   return (
-    <div className="flex-1 overflow-y-auto px-3 sm:px-4 py-3 pb-24 select-none text-left space-y-3" id="translator-studio">
+    <div className="flex-1 overflow-y-auto px-2.5 py-3 pb-36 select-none text-left space-y-3" id="translator-studio">
       
-      {/* Header and Branding (Material 3 Card) */}
-      <div className="bg-gradient-to-br from-slate-900 via-emerald-950/30 to-slate-950 p-3.5 rounded-2xl border border-emerald-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-2">
+      {/* Header and Branding (Material 3 Card) - Compressed */}
+      <div className="bg-gradient-to-br from-slate-900 via-emerald-950/30 to-slate-950 p-2.5 rounded-xl border border-emerald-500/20 shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-1.5">
         <div className="flex items-center gap-2">
           <div className="p-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
             <Languages className="w-4 h-4 text-emerald-400" />
           </div>
           <div>
-            <h1 className="text-xs sm:text-sm font-bold text-white tracking-wide">
+            <h1 className="text-xs font-bold text-white tracking-wide">
               Universal Translator
             </h1>
-            <p className="text-[9px] text-slate-300">
+            <p className="text-[8px] text-slate-450">
               Secure Local Device Routing • Pure Gemini API Translation Core
             </p>
           </div>
