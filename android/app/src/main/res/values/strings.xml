@@ -2,6 +2,6 @@
 <resources>
     <string name="app_name">Burmese Recap Tool</string>
     <string name="title_activity_main">Burmese Recap Tool</string>
-    <string name="package_name">com.myanmarsol.burmese_recap_tool</string>
-    <string name="custom_url_scheme">com.myanmarsol.burmese_recap_tool</string>
+    <string name="package_name">com.burmeserecap.tool</string>
+    <string name="custom_url_scheme">com.burmeserecap.tool</string>
 </resources>

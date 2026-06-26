@@ -1,4 +1,4 @@
-package com.myanmarsol.burmese_recap_tool;
+package com.burmeserecap.tool;
 
 import com.getcapacitor.BridgeActivity;
 

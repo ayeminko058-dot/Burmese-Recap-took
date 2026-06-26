@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.myanmarsol.burmese_recap_tool"
+    namespace "com.burmeserecap.tool"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.myanmarsol.burmese_recap_tool"
+        applicationId "com.burmeserecap.tool"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
