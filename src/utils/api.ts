@@ -34,20 +34,24 @@ export function getApiUrl(endpoint: string): string {
   }
 
   // Hardcoded active Cloud Run service URL fallback so it works out of the box in production APK builds
-  const defaultFallback = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+  const defaultFallback = "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
   return `${defaultFallback}${cleanEndpoint}`;
 }
 
 /**
  * Custom cross-platform fetch implementation.
  * Uses CapacitorHttp native calls under the hood on Android/iOS to bypass CORS, origin blocks, and cookie restrictions.
- * Transparently falls back to standard window.fetch on the web.
+ * Transparently falls back to standard window.fetch on the web or for FormData payloads.
  */
 export async function safeFetch(url: string, options: any = {}): Promise<Response> {
   const platform = Capacitor.getPlatform();
   const isNative = platform === "android" || platform === "ios";
 
-  if (!isNative || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file:")) {
+  // FormData bodies MUST bypass CapacitorHttp because the native bridge cannot serialize standard multipart FormData.
+  // Standard fetch is 100% supported and secure on native WebView with our open CORS server configuration.
+  const isFormData = options.body && (options.body instanceof FormData || (typeof options.body === "object" && options.body.constructor?.name === "FormData"));
+
+  if (!isNative || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file:") || isFormData) {
     return fetch(url, options);
   }
 

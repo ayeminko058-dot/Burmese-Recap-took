@@ -837,6 +837,8 @@ function sliceAudioAsync(inputPath: string, startMs: number, durationMs: number,
 // Robust LocalFileManager checking if the Whisper model exists in local storage
 class LocalFileManager {
   private static possiblePaths = [
+    path.resolve("/tmp/ggml-tiny.bin"),
+    path.resolve("/tmp/whisper-tiny.bin"),
     path.resolve("./assets/models/ggml-tiny.bin"),
     path.resolve("./dist/assets/models/ggml-tiny.bin"),
     path.resolve("./models/ggml-tiny.bin"),
@@ -851,9 +853,9 @@ class LocalFileManager {
 
   /**
    * Verifies if the local Whisper model file is packaged and exists in any of the potential local storage locations.
-   * Throws a precise, clear local offline error if missing, rather than attempting any internet download.
+   * If missing, automatically downloads it from Hugging Face on-demand.
    */
-  public static verifyModelExists(): string {
+  public static async verifyModelExists(): Promise<string> {
     console.log("[LocalFileManager] Verifying local model files for 100% offline-first compliance...");
     
     for (const modelPath of this.possiblePaths) {
@@ -874,18 +876,69 @@ class LocalFileManager {
       }
     }
 
-    // Precise local offline error instead of API-based/server download fallback
-    throw new Error(
-      "Offline Whisper Model Missing: The model file 'whisper-tiny.bin' or 'ggml-tiny.bin' was not found in local internal storage. " +
-      "Please ensure that the model is bundled in the assets folder at 'android/app/src/main/assets/whisper-tiny.bin', " +
-      "'assets/models/ggml-tiny.bin' or in the 'models/' directory during packaging."
-    );
+    // Model was not found locally. Let's automatically download it on-demand to /tmp/ggml-tiny.bin
+    const targetTmpPath = path.resolve("/tmp/ggml-tiny.bin");
+    console.log(`[LocalFileManager] Whisper model not found in any local path. Attempting to download to ${targetTmpPath}...`);
+    
+    try {
+      if (fs.existsSync(targetTmpPath)) {
+        const stats = fs.statSync(targetTmpPath);
+        if (stats.size > 10 * 1024 * 1024) {
+          console.log(`[LocalFileManager] Found valid previously downloaded Whisper model at: ${targetTmpPath}`);
+          return targetTmpPath;
+        }
+      }
+
+      // Download the model
+      const modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin";
+      console.log(`[LocalFileManager] Downloading Whisper model from Hugging Face: ${modelUrl}`);
+      
+      await new Promise<void>((resolve, reject) => {
+        const file = fs.createWriteStream(targetTmpPath);
+        https.get(modelUrl, (response) => {
+          if (response.statusCode && response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+            // Handle redirects
+            https.get(response.headers.location, (redirectResponse) => {
+              redirectResponse.pipe(file);
+              file.on("finish", () => {
+                file.close();
+                resolve();
+              });
+            }).on("error", (err) => {
+              try { fs.unlinkSync(targetTmpPath); } catch {}
+              reject(err);
+            });
+          } else {
+            response.pipe(file);
+            file.on("finish", () => {
+              file.close();
+              resolve();
+            });
+          }
+        }).on("error", (err) => {
+          try { fs.unlinkSync(targetTmpPath); } catch {}
+          reject(err);
+        });
+      });
+
+      const stats = fs.statSync(targetTmpPath);
+      console.log(`[LocalFileManager] Successfully downloaded Whisper model of size ${(stats.size / (1024 * 1024)).toFixed(1)} MB to ${targetTmpPath}`);
+      return targetTmpPath;
+    } catch (downloadErr: any) {
+      console.error("[LocalFileManager] Failed to download Whisper model on-demand:", downloadErr.message || downloadErr);
+      
+      // Precise fallback error
+      throw new Error(
+        `Offline Whisper Model Missing and automatic download failed: ${downloadErr.message || downloadErr}. ` +
+        "Please ensure that the model is bundled in the assets folder at 'android/app/src/main/assets/whisper-tiny.bin' during packaging."
+      );
+    }
   }
 }
 
 // Ensure local Whisper model exists at ./models/ggml-tiny.bin (Local-first compliance check)
 async function ensureWhisperModelExists(): Promise<string> {
-  return LocalFileManager.verifyModelExists();
+  return await LocalFileManager.verifyModelExists();
 }
 
 // Helper to get audio duration via ffprobe or file size estimation
@@ -1096,7 +1149,7 @@ async function transcribeWithGemini(audioPath: string, apiKey: string): Promise<
 // Transcribe with Whisper model locally or fall back to Gemini Audio Transcription (multimodal API)
 async function transcribeWithWhisper(audioPath: string, apiKey?: string): Promise<any[]> {
   try {
-    const modelPath = LocalFileManager.verifyModelExists();
+    const modelPath = await LocalFileManager.verifyModelExists();
     console.log(`[Whisper Local] Found local model file at ${modelPath}. Initializing local whisper-node transcription...`);
     
     // Dynamic import to prevent startup crashes if C++ native binary has issues loading on the host environment

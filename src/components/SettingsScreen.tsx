@@ -41,7 +41,7 @@ export default function SettingsScreen({
     }
 
     const savedServerUrl = localStorage.getItem("server_url") || "";
-    setServerUrl(savedServerUrl || "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+    setServerUrl(savedServerUrl || "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
     setIsCustomServerUrl(!!savedServerUrl);
   }, []);
 
@@ -53,7 +53,7 @@ export default function SettingsScreen({
     if (!cleanUrl) {
       localStorage.removeItem("server_url");
       setIsCustomServerUrl(false);
-      setServerUrl("https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+      setServerUrl("https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
       onAddNotification("Server URL Reset", "Reset to default active Cloud Run server URL.", "info");
     } else {
       localStorage.setItem("server_url", cleanUrl);
@@ -67,7 +67,7 @@ export default function SettingsScreen({
   const handleResetServerUrl = () => {
     localStorage.removeItem("server_url");
     setIsCustomServerUrl(false);
-    setServerUrl("https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+    setServerUrl("https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
     onAddNotification("Server URL Reset", "Reset to default active Cloud Run server URL.", "info");
     window.dispatchEvent(new Event("storage"));
   };
@@ -282,6 +282,38 @@ export default function SettingsScreen({
                 placeholder="https://your-cloud-run-url..."
                 className="bg-transparent text-xs text-white flex-1 px-1.5 outline-none font-mono placeholder-slate-700 select-text"
               />
+            </div>
+
+            {/* Quick Presets Deck */}
+            <div className="grid grid-cols-2 gap-2 text-[9.5px] font-bold select-none">
+              <button
+                type="button"
+                onClick={() => {
+                  const url = "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+                  setServerUrl(url);
+                  localStorage.setItem("server_url", url);
+                  setIsCustomServerUrl(true);
+                  onAddNotification("Connected to Dev", "Active live development backend server selected.", "success");
+                  window.dispatchEvent(new Event("storage"));
+                }}
+                className="bg-purple-950/20 border border-purple-500/20 hover:border-purple-500/45 text-purple-300 py-1.5 px-2 rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer font-mono"
+              >
+                ⚡ Live Dev Node
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const url = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+                  setServerUrl(url);
+                  localStorage.setItem("server_url", url);
+                  setIsCustomServerUrl(true);
+                  onAddNotification("Connected to Prod/Pre", "Production shared gateway server selected.", "success");
+                  window.dispatchEvent(new Event("storage"));
+                }}
+                className="bg-blue-950/20 border border-blue-500/20 hover:border-blue-500/45 text-blue-300 py-1.5 px-2 rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer font-mono"
+              >
+                🌐 Shared Prod Node
+              </button>
             </div>
 
             {/* Storage status visualizer */}
