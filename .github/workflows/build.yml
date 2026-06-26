@@ -35,6 +35,13 @@ jobs:
           # Completely remove the corrupt jar file from the workplace environment before setup
           rm -f android/gradle/wrapper/gradle-wrapper.jar
 
+      - name: Inject Genuine Whisper Model Asset
+        run: |
+          mkdir -p android/app/src/main/assets/
+          rm -f android/app/src/main/assets/whisper-tiny.bin
+          curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" -o android/app/src/main/assets/whisper-tiny.bin
+          ls -lh android/app/src/main/assets/
+
       - name: Setup Dynamic Gradle Tooling (Clean Installation)
         uses: gradle/actions/setup-gradle@v3
         with:

@@ -85,6 +85,25 @@ const app = express();
 const PORT = 3000;
 const upload = multer({ dest: os.tmpdir() });
 
+// Custom CORS middleware to fully support native Android/iOS Capacitor webview origins
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, PATCH, DELETE");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Gemini-API-Key, Accept");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+
+  if (req.method === "OPTIONS") {
+    res.sendStatus(200);
+    return;
+  }
+  next();
+});
+
 app.use(express.json({ limit: "100mb" }));
 app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
@@ -821,9 +840,13 @@ class LocalFileManager {
     path.resolve("./assets/models/ggml-tiny.bin"),
     path.resolve("./dist/assets/models/ggml-tiny.bin"),
     path.resolve("./models/ggml-tiny.bin"),
+    path.resolve("./android/app/src/main/assets/whisper-tiny.bin"),
+    path.resolve("./android/app/src/main/assets/ggml-tiny.bin"),
     path.resolve(process.cwd(), "assets/models/ggml-tiny.bin"),
     path.resolve(process.cwd(), "dist/assets/models/ggml-tiny.bin"),
     path.resolve(process.cwd(), "models/ggml-tiny.bin"),
+    path.resolve(process.cwd(), "android/app/src/main/assets/whisper-tiny.bin"),
+    path.resolve(process.cwd(), "android/app/src/main/assets/ggml-tiny.bin"),
   ];
 
   /**
@@ -853,9 +876,9 @@ class LocalFileManager {
 
     // Precise local offline error instead of API-based/server download fallback
     throw new Error(
-      "Offline Whisper Model Missing: The model file 'ggml-tiny.bin' was not found in local internal storage. " +
-      "Please ensure that the model is bundled in the assets folder at 'assets/models/ggml-tiny.bin' or in the " +
-      "'models/' directory during packaging."
+      "Offline Whisper Model Missing: The model file 'whisper-tiny.bin' or 'ggml-tiny.bin' was not found in local internal storage. " +
+      "Please ensure that the model is bundled in the assets folder at 'android/app/src/main/assets/whisper-tiny.bin', " +
+      "'assets/models/ggml-tiny.bin' or in the 'models/' directory during packaging."
     );
   }
 }
@@ -1072,11 +1095,47 @@ async function transcribeWithGemini(audioPath: string, apiKey: string): Promise<
 
 // Transcribe with Whisper model locally or fall back to Gemini Audio Transcription (multimodal API)
 async function transcribeWithWhisper(audioPath: string, apiKey?: string): Promise<any[]> {
+  try {
+    const modelPath = LocalFileManager.verifyModelExists();
+    console.log(`[Whisper Local] Found local model file at ${modelPath}. Initializing local whisper-node transcription...`);
+    
+    // Dynamic import to prevent startup crashes if C++ native binary has issues loading on the host environment
+    const { whisper } = await import("whisper-node");
+    
+    console.log(`[Whisper Local] Transcribing audio path: ${audioPath}`);
+    const results = await whisper(audioPath, {
+      modelPath: modelPath,
+      whisperOptions: {
+        language: "auto",
+        gen_file_txt: false,
+        gen_file_subtitle: false,
+        gen_file_vtt: false,
+        word_timestamps: false
+      }
+    });
+
+    console.log(`[Whisper Local] Transcription completed successfully with ${results?.length || 0} segments.`);
+    if (results && Array.isArray(results) && results.length > 0) {
+      // Map results to the expected segment structure
+      return results.map((segment: any) => ({
+        start: segment.start || "00:00:00,000",
+        end: segment.end || "00:00:05,000",
+        speech: segment.speech || segment.text || "",
+        text: segment.speech || segment.text || ""
+      }));
+    }
+    
+    console.warn("[Whisper Local] Whisper returned empty segments. Falling back to Gemini STT...");
+  } catch (localError: any) {
+    console.warn(`[Whisper Local] Local Whisper transcription failed: ${localError.message || localError}. Falling back to Gemini STT...`);
+  }
+
+  // Fallback to high-speed, direct Gemini STT pipeline if local Whisper is not available or fails
   const activeKey = apiKey || process.env.GEMINI_API_KEY;
   if (!activeKey) {
-    throw new Error("Gemini API key is required to run the purged Voice-to-Text transcriber.");
+    throw new Error("Gemini API key is required to run the Voice-to-Text transcription fallback.");
   }
-  // Whisper is completely purged! We route 100% of the transcription traffic to our high-speed, direct Gemini STT pipeline.
+  console.log("[Whisper Fallback] Routing transcription traffic to high-performance Gemini STT pipeline...");
   return transcribeWithGemini(audioPath, activeKey);
 }
 
