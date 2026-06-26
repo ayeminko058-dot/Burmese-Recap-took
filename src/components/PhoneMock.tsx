@@ -613,29 +613,7 @@ export default function PhoneMock({
       {/* BOTTOM PERSISTENT REGION - Floating elegantly with Safe Area bottom spacing */}
       <div className="absolute bottom-0 left-0 right-0 z-50 pointer-events-none flex flex-col items-center gap-2 px-4 pb-[calc(14px+env(safe-area-inset-bottom))] mb-[env(safe-area-inset-bottom)] select-none">
 
-        {/* HIGH-FIDELITY ADMOB BANNER AD CONTAINER - STACKED LINEARLY ABOVE NAVIGATION */}
-        <div className="w-full max-w-sm bg-[#0D1321] border border-slate-800/80 rounded-xl pointer-events-auto shadow-[0_4px_20px_rgba(0,0,0,0.5)] p-2 flex items-center justify-between gap-3 text-left overflow-hidden relative group">
-          <div className="absolute top-0 right-0 w-16 h-16 bg-blue-500/5 rounded-full blur-xl pointer-events-none" />
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className="text-[7.5px] bg-slate-800 text-slate-400 font-extrabold px-1.5 py-0.5 rounded border border-slate-700/50 uppercase font-mono tracking-wider shrink-0 select-none">
-              Ad
-            </span>
-            <div className="min-w-0">
-              <h4 className="text-[10px] font-bold text-slate-200 truncate leading-tight">
-                Upgrade to Creator Pro
-              </h4>
-              <p className="text-[8px] text-slate-400 truncate mt-0.5 leading-none">
-                Unlimited speed downloads, lossless PCM, & crystal clear Burmese voices.
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={() => handlePushScreen("settings")}
-            className="shrink-0 text-[8px] font-extrabold bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded-lg transition shadow-sm active:scale-95"
-          >
-            Get Pro
-          </button>
-        </div>
+
 
         {/* PREMIUM FLOATING GLASSMORPHIC BOTTOM NAVIGATION BAR - RE-INDEXED WITH SOLID BACKGROUND */}
         <div className="w-full max-w-sm bg-[#0D1321] border border-slate-800/80 rounded-2xl pointer-events-auto shadow-[0_12px_40px_rgba(0,0,0,0.8)] py-3 px-6 flex items-center justify-between shrink-0 z-50">

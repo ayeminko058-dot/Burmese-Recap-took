@@ -36,6 +36,9 @@ jobs:
       - name: Build Native Debug APK
         run: |
           cd android
+          # Forcefully generate a clean, fresh gradle wrapper to resolve corrupt jar faults
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
           ./gradlew assembleDebug
 
       - name: Upload Debug APK Artifact
