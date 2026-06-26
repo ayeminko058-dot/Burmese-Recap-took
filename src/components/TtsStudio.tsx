@@ -4,7 +4,7 @@ import {
 } from "lucide-react";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { triggerInterstitialAd } from "../utils/admob";
-import { getApiUrl } from "../utils/api";
+import { getApiUrl, safeFetch } from "../utils/api";
 import { VoiceOption } from "../types";
 
 export const VOICE_MATRIX: VoiceOption[] = [
@@ -87,12 +87,13 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         computedPitch = "+0Hz";
       }
 
-      const response = await fetch(getApiUrl("/api/tts"), {
+      const response = await safeFetch(getApiUrl("/api/tts"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Accept": "audio/mpeg, */*"
         },
+        responseType: "blob",
         body: JSON.stringify({
           text: text.trim(),
           voice: selectedVoice,

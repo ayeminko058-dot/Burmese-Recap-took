@@ -1,4 +1,4 @@
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 /**
  * Returns a fully qualified absolute URL for API calls in native environments,
@@ -36,4 +36,103 @@ export function getApiUrl(endpoint: string): string {
   // Hardcoded active Cloud Run service URL fallback so it works out of the box in production APK builds
   const defaultFallback = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
   return `${defaultFallback}${cleanEndpoint}`;
+}
+
+/**
+ * Custom cross-platform fetch implementation.
+ * Uses CapacitorHttp native calls under the hood on Android/iOS to bypass CORS, origin blocks, and cookie restrictions.
+ * Transparently falls back to standard window.fetch on the web.
+ */
+export async function safeFetch(url: string, options: any = {}): Promise<Response> {
+  const platform = Capacitor.getPlatform();
+  const isNative = platform === "android" || platform === "ios";
+
+  if (!isNative || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file:")) {
+    return fetch(url, options);
+  }
+
+  try {
+    console.log(`[SafeFetch] Initiating native HTTP request: [${options.method || "GET"}] to ${url}`);
+
+    const method = (options.method || "GET").toUpperCase();
+    const headers = { ...(options.headers || {}) };
+
+    // Standardize Content-Type for JSON payloads if not specified
+    if (options.body && !(options.body instanceof FormData) && !headers["Content-Type"]) {
+      headers["Content-Type"] = "application/json";
+    }
+
+    let data: any = options.body;
+    
+    // Parse JSON string to raw object for Capacitor's native bridge
+    if (typeof options.body === "string" && headers["Content-Type"]?.includes("application/json")) {
+      try {
+        data = JSON.parse(options.body);
+      } catch (e) {
+        console.warn("[SafeFetch] Failed to parse JSON string body:", e);
+      }
+    }
+
+    // Determine the response representation needed
+    const isTtsRequest = url.includes("/api/tts") || options.responseType === "blob";
+    const responseType = isTtsRequest ? "arraybuffer" : "json";
+
+    const httpOptions: any = {
+      url,
+      method,
+      headers,
+      data,
+      responseType,
+      connectTimeout: 60000,
+      readTimeout: 60000,
+    };
+
+    const nativeResponse = await CapacitorHttp.request(httpOptions);
+
+    // Build the Headers mapping list
+    const responseHeaders = new Headers();
+    if (nativeResponse.headers) {
+      Object.entries(nativeResponse.headers).forEach(([key, value]) => {
+        responseHeaders.append(key, String(value));
+      });
+    }
+
+    let responseBody: any;
+
+    if (isTtsRequest) {
+      // Decode arraybuffer/base64 binary payloads into actual browser blobs
+      let binaryBuffer: ArrayBuffer;
+      if (typeof nativeResponse.data === "string") {
+        const decoded = window.atob(nativeResponse.data);
+        const uintArray = new Uint8Array(decoded.length);
+        for (let i = 0; i < decoded.length; i++) {
+          uintArray[i] = decoded.charCodeAt(i);
+        }
+        binaryBuffer = uintArray.buffer;
+      } else if (nativeResponse.data instanceof ArrayBuffer) {
+        binaryBuffer = nativeResponse.data;
+      } else {
+        // Fallback for other formats
+        binaryBuffer = new ArrayBuffer(0);
+      }
+      
+      responseBody = new Blob([binaryBuffer], { 
+        type: nativeResponse.headers["content-type"] || "audio/mpeg" 
+      });
+    } else {
+      // Map standard responses as JSON string representation
+      responseBody = typeof nativeResponse.data === "object" 
+        ? JSON.stringify(nativeResponse.data) 
+        : nativeResponse.data;
+    }
+
+    return new Response(responseBody, {
+      status: nativeResponse.status,
+      statusText: `Capacitor Native Success (${nativeResponse.status})`,
+      headers: responseHeaders,
+    });
+  } catch (error: any) {
+    console.error("[SafeFetch] Native request failed. Falling back to default browser engine...", error);
+    return fetch(url, options);
+  }
 }

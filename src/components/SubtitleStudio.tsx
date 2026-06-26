@@ -6,7 +6,7 @@ import { Filesystem, Directory } from "@capacitor/filesystem";
 import { triggerInterstitialAd } from "../utils/admob";
 import { SubtitleBlock } from "../types";
 import { performProportionalAutoAlignment } from "../utils/burmeseProcessor";
-import { getApiUrl } from "../utils/api";
+import { getApiUrl, safeFetch } from "../utils/api";
 
 // ==========================================
 // 5. ENCAPSULATED BURMESE SUBTITLE ENGINE
@@ -572,7 +572,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
 
         let response;
         try {
-          response = await fetch(getApiUrl("/api/subtitle/align"), {
+          response = await safeFetch(getApiUrl("/api/subtitle/align"), {
             method: "POST",
             headers: {
               "X-Gemini-API-Key": savedKey

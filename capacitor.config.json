@@ -2,5 +2,13 @@
   "appId": "com.burmeserecap.tool",
   "appName": "Burmese Recap Tool",
   "webDir": "dist",
-  "bundledWebRuntime": false
+  "bundledWebRuntime": false,
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    },
+    "CapacitorCookies": {
+      "enabled": true
+    }
+  }
 }

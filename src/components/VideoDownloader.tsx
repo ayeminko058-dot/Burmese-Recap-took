@@ -5,7 +5,7 @@ import {
   Sparkles, CheckCircle2, Trash2, Key, RefreshCw, Eye, EyeOff, Share2, HelpCircle
 } from "lucide-react";
 import { triggerInterstitialAd } from "../utils/admob";
-import { getApiUrl } from "../utils/api";
+import { getApiUrl, safeFetch } from "../utils/api";
 import { DownloadTask } from "../types";
 
 interface VideoDownloaderProps {
@@ -105,7 +105,7 @@ export default function VideoDownloader({
     setValidationError(null);
 
     try {
-      const response = await fetch(getApiUrl("/api/validate-key"), {
+      const response = await safeFetch(getApiUrl("/api/validate-key"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -379,7 +379,7 @@ export default function VideoDownloader({
       formData.append("fileName", selectedFile.name);
       formData.append("mimeType", "audio/wav");
 
-      const response = await fetch(getApiUrl("/api/subtitle/generate-stream"), {
+      const response = await safeFetch(getApiUrl("/api/subtitle/generate-stream"), {
         method: "POST",
         headers: {
           "X-Gemini-API-Key": savedKey,
