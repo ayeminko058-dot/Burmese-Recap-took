@@ -47,6 +47,7 @@ configurations.all {
         force 'androidx.core:core-ktx:1.12.0'
         force 'androidx.appcompat:appcompat:1.6.1'
         force 'androidx.activity:activity:1.8.2'
+        force 'androidx.core:core-splashscreen:1.0.1'
     }
 }
 
