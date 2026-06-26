@@ -38,14 +38,14 @@ jobs:
       - name: Setup Dynamic Gradle Tooling (Clean Installation)
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.7
+          gradle-version: 8.9
           generate-job-summary: false
 
       - name: Compile Native Debug APK
         run: |
           cd android
           # Regenerate proper executable attributes
-          gradle wrapper --gradle-version 8.7
+          gradle wrapper --gradle-version 8.9
           chmod +x gradlew || true
           ./gradlew assembleDebug --no-daemon
 
