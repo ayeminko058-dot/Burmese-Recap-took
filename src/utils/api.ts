@@ -6,6 +6,7 @@ import { Capacitor, CapacitorHttp } from "@capacitor/core";
  * This prevents relative path resolution failures inside the native app container.
  */
 export function getApiUrl(endpoint: string): string {
+  // Ensure endpoint starts with exactly one slash
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
 
   if (typeof window !== "undefined") {
@@ -23,14 +24,23 @@ export function getApiUrl(endpoint: string): string {
     // Check if there is a custom server URL configured in localStorage
     const savedServerUrl = localStorage.getItem("server_url");
     if (savedServerUrl && savedServerUrl.trim()) {
-      return `${savedServerUrl.trim()}${cleanEndpoint}`;
+      let base = savedServerUrl.trim();
+      // Strips trailing slashes to prevent double slashes like "https://host.com//api/endpoint"
+      while (base.endsWith("/")) {
+        base = base.slice(0, -1);
+      }
+      return `${base}${cleanEndpoint}`;
     }
   }
 
   // Check if there is a VITE_APP_URL environment variable from build configurations
   const envUrl = (import.meta as any).env?.VITE_APP_URL;
   if (envUrl && envUrl.trim()) {
-    return `${envUrl.trim()}${cleanEndpoint}`;
+    let base = envUrl.trim();
+    while (base.endsWith("/")) {
+      base = base.slice(0, -1);
+    }
+    return `${base}${cleanEndpoint}`;
   }
 
   // Hardcoded active Cloud Run service URL fallback so it works out of the box in production APK builds
@@ -52,7 +62,30 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
   const isFormData = options.body && (options.body instanceof FormData || (typeof options.body === "object" && options.body.constructor?.name === "FormData"));
 
   if (!isNative || url.startsWith("blob:") || url.startsWith("data:") || url.startsWith("file:") || isFormData) {
-    return fetch(url, options);
+    try {
+      const rawRes = await fetch(url, options);
+      const contentType = rawRes.headers.get("content-type");
+      
+      // If the request succeeded but returned HTML instead of expected JSON/binary, intercept it.
+      if (rawRes.ok && (!contentType || !contentType.includes("application/json")) && !url.includes("/api/tts") && !url.includes(".mp3")) {
+        const clone = rawRes.clone();
+        const text = await clone.text().catch(() => "");
+        const trimmed = text.trim();
+        if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
+          return new Response(JSON.stringify({
+            error: "Route redirection or invalid server response: The server returned an HTML page instead of JSON. Please verify the backend server is active and trailing slashes are eliminated."
+          }), {
+            status: 502,
+            statusText: "Bad Gateway (HTML returned)",
+            headers: new Headers({ "Content-Type": "application/json" }),
+          });
+        }
+      }
+      return rawRes;
+    } catch (fetchErr: any) {
+      console.warn("[SafeFetch] Web-fallback fetch failed:", fetchErr);
+      throw fetchErr;
+    }
   }
 
   try {
@@ -128,6 +161,20 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
       responseBody = typeof nativeResponse.data === "object" 
         ? JSON.stringify(nativeResponse.data) 
         : nativeResponse.data;
+
+      // Intercept HTML pages returned with 200 OK
+      if (typeof responseBody === "string") {
+        const trimmed = responseBody.trim();
+        if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
+          return new Response(JSON.stringify({ 
+            error: "Route redirection or invalid server response: The server returned an HTML error page instead of JSON data. Please verify the backend server is active and the URL is configured correctly." 
+          }), {
+            status: 502,
+            statusText: "Bad Gateway (HTML returned)",
+            headers: new Headers({ "Content-Type": "application/json" }),
+          });
+        }
+      }
     }
 
     return new Response(responseBody, {

@@ -109,37 +109,23 @@ export default function SettingsScreen({
     setValidationError(null);
 
     try {
-      const response = await safeFetch(getApiUrl("/api/validate-key"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Gemini-API-Key": keyToValidate
-        }
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: keyToValidate });
+      
+      // Perform a minimal, lightweight test generateContent call to verify key credentials
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: "Hello, answer with only 'OK'.",
       });
-      
-      const contentType = response.headers.get("content-type");
-      let data: any = {};
-      
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json().catch(() => ({}));
-      } else {
-        const rawText = await response.text().catch(() => "");
-        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
-          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
-        }
-        throw new Error(rawText.substring(0, 100) || "Server error.");
-      }
 
-      if (response.ok && data.valid) {
+      if (response && response.text) {
         setValidationStatus("valid");
         onAddNotification("API key verified", "Gemini validation handshake passed.", "success");
       } else {
-        setValidationStatus("invalid");
-        setValidationError(data.error || "Handshake rejected by Google servers. Confirm your key credentials.");
-        onAddNotification("Handshake failed", "Google rejected the selected credentials.", "warning");
+        throw new Error("Empty response returned from Gemini key validation probe.");
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Gemini validation failed:", err);
       setValidationStatus("invalid");
       setValidationError(err.message || "Could not complete network verification handshake.");
       onAddNotification("Handshake failure", "Validation connection interrupted.", "warning");

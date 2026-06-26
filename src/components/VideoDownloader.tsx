@@ -368,78 +368,77 @@ export default function VideoDownloader({
         setBackendStatusMsg("Stage 1 (Fallback): Sending original file directly...");
       }
 
-      // Step 2: Upload and direct stream transcribing
+      // Step 2: Direct client-side transcribing with Gemini
       setProgress(45);
-      setBackendStatusMsg("Stage 2: Transcribing speech via Gemini API...");
-      onAddNotification("Uploading Track", "Initiating high-speed audio stream pipeline to Gemini backend...", "info");
-      
-      const formData = new FormData();
-      formData.append("file", audioBlob, `${selectedFile.name.replace(/\.[^/.]+$/, "")}_audio.wav`);
-      formData.append("format", formatSelection);
-      formData.append("fileName", selectedFile.name);
-      formData.append("mimeType", "audio/wav");
+      setBackendStatusMsg("Stage 2: Transcribing speech via Direct Gemini API on-device...");
+      onAddNotification("Direct Handshake", "Initiating client-side direct audio transcription with Gemini...", "info");
 
-      const response = await safeFetch(getApiUrl("/api/subtitle/generate-stream"), {
-        method: "POST",
-        headers: {
-          "X-Gemini-API-Key": savedKey,
-        },
-        body: formData,
+      // Convert audioBlob into base64 format for inline passing
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const res = reader.result as string;
+          resolve(res.split(",")[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(audioBlob);
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `Server responded with status ${response.status}`);
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: savedKey });
+
+      let prompt = "";
+      if (formatSelection === "srt") {
+        prompt = `You will receive an audio file. Perform an exact and highly accurate speech transcription of what is spoken.
+Translate the transcribed spoken speech into clear English subtitles.
+Deliver the results strictly in the SubRip Subtitle (SRT) format. 
+Format requirements:
+- Use exact sequential block numbers starting from 1.
+- Include accurate timestamps in the standard format (e.g., 00:00:01,200 --> 00:00:04,500).
+- Produce ONLY raw SRT text content.
+- Absolute ban on markdown formatting code blocks (do not wrap in \`\`\` or \`\`\`srt).
+- Do not add any notes, preamble, explanations, or introductory/explanatory text.
+- If speech in some segment is unclear, write [inaudible].
+- Keep subtitle duration within reasonable intervals.`;
+      } else {
+        prompt = `You will receive an audio file. Perform an exact, high-fidelity transcription of all spoken words in the audio.
+Output the full transcription in clear English text.
+Strict instructions:
+- Output ONLY the transcribed text. Do not summarize, outline, rewrite, or explain under any circumstances.
+- Do not add markdown blocks, notes, comments, meta tags, or conversational intros/outros.
+- If some speech is unclear or there is silence, print "[inaudible]" or omit as appropriate. Do not attempt to guess or invent context.`;
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) {
-        throw new Error("Streaming transmission not supported by your browser environment.");
-      }
+      setProgress(60);
+      setBackendStatusMsg("Stage 2: Gemini is analyzing speech acoustics...");
 
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let resultText = "";
+      const geminiResponse = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: [
+          {
+            inlineData: {
+              mimeType: "audio/wav",
+              data: base64Data,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      setProgress(85);
+      setBackendStatusMsg("Stage 3: Parsing received transcription timelines...");
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || !trimmed.startsWith("data: ")) continue;
-
-          try {
-            const payload = JSON.parse(trimmed.substring(6));
-            const serverProgress = typeof payload.progress === "number" ? payload.progress : 0;
-            const serverMsg = payload.message || "";
-
-            const displayProgress = Math.round(45 + (serverProgress * 0.55));
-            setProgress(Math.min(displayProgress, 99));
-            setBackendStatusMsg(`Stage 2: ${serverMsg}`);
-
-            // Dynamically adjust status to reflect backend progress perfectly
-            if (serverProgress < 50) {
-              setStatus("extracting_audio");
-            } else if (serverProgress >= 50 && serverProgress < 100) {
-              setStatus("transcribing");
-            }
-
-            if (serverProgress === 100 && payload.output) {
-              resultText = payload.output;
-            }
-          } catch (jsonErr) {
-            console.warn("Failed to parse streamed SSE event line:", trimmed, jsonErr);
-          }
-        }
+      let resultText = geminiResponse.text || "";
+      
+      // Clean markdown wrap blocks if any returned
+      if (resultText.includes("```")) {
+        resultText = resultText.replace(/```[a-z]*\n?/gi, "").replace(/```/g, "").trim();
       }
 
       if (!resultText) {
-        throw new Error("No transcription text returned from the Gemini pipeline.");
+        throw new Error("No transcription text returned from the direct Gemini pipeline.");
       }
 
       // Intercept with Interstitial Ad before displaying results to user

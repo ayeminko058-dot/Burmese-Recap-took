@@ -87,61 +87,114 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         computedPitch = "+0Hz";
       }
 
-      const response = await safeFetch(getApiUrl("/api/tts"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "audio/mpeg, */*"
-        },
-        responseType: "blob",
-        body: JSON.stringify({
-          text: text.trim(),
-          voice: selectedVoice,
-          style: selectedStyle,
-          rate: computedRate,
-          pitch: computedPitch,
-        }),
-      });
+      // Replicate sentence-splitting and chunking from server.ts directly on the client
+      const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
+      const cleanedChunks: string[] = [];
+      let currentChunk = "";
+      let currentLinesCount = 0;
 
-      if (!response.ok) {
-        const contentType = response.headers.get("content-type");
-        let errorData: any = {};
-        
-        if (contentType && contentType.includes("application/json")) {
-          errorData = await response.json().catch(() => ({}));
-        } else {
-          const rawText = await response.text().catch(() => "");
-          if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
-            throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+      for (let sentence of sentences) {
+        if (sentence.length > 1800) {
+          if (currentChunk) {
+            cleanedChunks.push(currentChunk.trim());
+            currentChunk = "";
+            currentLinesCount = 0;
           }
-          throw new Error(rawText.substring(0, 100) || "Gateway error from host.");
+          let temp = sentence;
+          while (temp.length > 1800) {
+            cleanedChunks.push(temp.slice(0, 1800));
+            temp = temp.slice(1800);
+          }
+          sentence = temp;
+          if (!sentence) continue;
         }
-        throw new Error(errorData.error || "တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
+
+        if (currentChunk && (currentChunk.length + sentence.length + 1 > 1800 || currentLinesCount >= 10)) {
+          cleanedChunks.push(currentChunk.trim());
+          currentChunk = sentence;
+          currentLinesCount = 1;
+        } else {
+          if (currentChunk) {
+            const lastChar = currentChunk[currentChunk.length - 1];
+            const needsSpace = !/[။\s]/.test(lastChar);
+            currentChunk += (needsSpace ? " " : "") + sentence;
+          } else {
+            currentChunk = sentence;
+          }
+          currentLinesCount++;
+        }
+      }
+      if (currentChunk.trim()) {
+        cleanedChunks.push(currentChunk.trim());
       }
 
+      if (cleanedChunks.length === 0) {
+        throw new Error("The provided text contains no speakable characters.");
+      }
+
+      setProgressLog(`Synthesizing ${cleanedChunks.length} speech chunks in parallel...`);
+
+      const savedKey = localStorage.getItem("gemini_api_key") || "";
+      const fetchHeaders: Record<string, string> = {
+        "Accept": "*/*"
+      };
+      if (savedKey) {
+        fetchHeaders["X-Gemini-API-Key"] = savedKey;
+        fetchHeaders["Authorization"] = `Bearer ${savedKey}`;
+      }
+
+      const chunkPromises = cleanedChunks.map(async (chunkText, index) => {
+        const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
+        const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(computedRate)}&pitch=${encodeURIComponent(computedPitch)}`;
+        
+        let lastErr: any = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const response = await fetch(ttsUrl, { headers: fetchHeaders });
+            if (!response.ok) throw new Error(`HTTP status ${response.status}`);
+            const arrayBuffer = await response.arrayBuffer();
+            if (arrayBuffer.byteLength === 0) throw new Error("Received an empty audio buffer.");
+            return arrayBuffer;
+          } catch (err: any) {
+            lastErr = err;
+            if (attempt < 3) {
+              await new Promise(resolve => setTimeout(resolve, 800 * attempt));
+            }
+          }
+        }
+        throw lastErr || new Error("Unknown synthesis error");
+      });
+
+      const chunkBuffers = await Promise.all(chunkPromises);
       setProgressLog("Merging Final MP3 Voice...");
       await new Promise((resolve) => setTimeout(resolve, 600));
 
-      const audioBlob = await response.blob();
+      const audioBlob = new Blob(chunkBuffers, { type: "audio/mpeg" });
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error("Received an empty audio binary stream from synthesis server.");
       }
-      const localUrl = URL.createObjectURL(audioBlob);
 
-      setSyncedAudioUrl(localUrl);
-      setProgressLog("");
-      setIsSynthesizing(false);
-      onAddNotification(
-        "Vocal Track Generated",
-        `Synthesized long-form speech successfully. Click Play!`,
-        "success"
-      );
+      // Convert audio binary stream (Blob) into a Base64 Data URI to bypass local blob protocols block in native WebView
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64DataUrl = reader.result as string;
+        setSyncedAudioUrl(base64DataUrl);
+        setProgressLog("");
+        setIsSynthesizing(false);
+        onAddNotification(
+          "Vocal Track Generated",
+          `Synthesized long-form speech successfully. Click Play!`,
+          "success"
+        );
 
-      // Register inside files list
-      const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
-      
-      // Let's create a visual identifier for the file metadata
-      onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", localUrl);
+        // Register inside files list
+        const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
+        onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", base64DataUrl);
+      };
+      reader.onerror = () => {
+        throw new Error("Failed to compile audio stream into Base64 format.");
+      };
+      reader.readAsDataURL(audioBlob);
     } catch (err: any) {
       console.error(err);
       setProgressLog("");
@@ -170,21 +223,26 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         setIsDownloading(true);
         const fileName = `ZoeRecap_${Date.now()}.mp3`;
         try {
-          // Fetch raw audio blob
-          const res = await fetch(syncedAudioUrl);
-          const blob = await res.blob();
-          
-          // Convert to base64
-          const reader = new FileReader();
-          const base64Promise = new Promise<string>((resolve, reject) => {
-            reader.onloadend = () => {
-              const resStr = reader.result as string;
-              resolve(resStr.split(",")[1]);
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(blob);
-          });
-          const base64Data = await base64Promise;
+          let base64Data = "";
+          if (syncedAudioUrl.startsWith("data:")) {
+            base64Data = syncedAudioUrl.split(",")[1];
+          } else {
+            // Fetch raw audio blob
+            const res = await fetch(syncedAudioUrl);
+            const blob = await res.blob();
+            
+            // Convert to base64
+            const reader = new FileReader();
+            const base64Promise = new Promise<string>((resolve, reject) => {
+              reader.onloadend = () => {
+                const resStr = reader.result as string;
+                resolve(resStr.split(",")[1]);
+              };
+              reader.onerror = reject;
+              reader.readAsDataURL(blob);
+            });
+            base64Data = await base64Promise;
+          }
 
           // Write natively to external storage Download folder
           await Filesystem.writeFile({
@@ -386,7 +444,12 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
               <span className="text-[7.5px] font-mono text-slate-500">MPEG Layer-3</span>
             </div>
 
-            <audio ref={audioRef} src={syncedAudioUrl} className="hidden" />
+            <audio 
+              ref={audioRef} 
+              src={syncedAudioUrl} 
+              className="hidden" 
+              onEnded={() => setAudioPlayState(false)} 
+            />
 
             <div className="flex items-center gap-2.5 bg-[#0D1321] rounded-xl p-2.5 border border-slate-800">
               <button

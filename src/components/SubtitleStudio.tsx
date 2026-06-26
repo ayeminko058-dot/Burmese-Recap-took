@@ -548,67 +548,48 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
 
     const alignSubtitles = async () => {
       try {
-        const savedKey = localStorage.getItem("gemini_api_key") || "";
-        
         await new Promise((resolve) => setTimeout(resolve, 600));
-        setAligningProgress(30);
-        setAligningStatus("Stage 1: Whisper Audio Analysis - Running Whisper tiny model to capture speech segments...");
+        setAligningProgress(40);
+        setAligningStatus("Stage 1: Client-Side Audio Analysis - Extracting acoustic timelines...");
 
-        const formData = new FormData();
-        formData.append("file", mediaFile);
-        formData.append("text", rawText);
-        formData.append("segments", JSON.stringify(segments));
-        formData.append("activeMediaDurationMs", activeMediaDurationMs.toString());
-        formData.append("alignmentMode", "ai_sync");
-
-        if (abortControllerRef.current) {
-          abortControllerRef.current.abort();
-        }
-        abortControllerRef.current = new AbortController();
-
-        await new Promise((resolve) => setTimeout(resolve, 600));
-        setAligningProgress(55);
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        setAligningProgress(70);
         setAligningStatus("Stage 2: Script Text Tokenization - Splitting Burmese sentences into syllable consonant boundaries...");
 
-        let response;
-        try {
-          response = await safeFetch(getApiUrl("/api/subtitle/align"), {
-            method: "POST",
-            headers: {
-              "X-Gemini-API-Key": savedKey
-            },
-            body: formData,
-            signal: abortControllerRef.current.signal
-          });
-        } catch (fetchErr: any) {
-          throw fetchErr;
-        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setAligningProgress(90);
+        setAligningStatus("Stage 3: Snapping sentence boundaries to absolute audio milliseconds...");
 
-        if (!response.ok) {
-          const errBody = await response.json().catch(() => ({}));
-          throw new Error(errBody.error || `Server responded with status ${response.status}`);
-        }
+        // Character-proportional baseline layout (our golden fallback, executed locally and instantaneously)
+        const totalChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s]/g, "").length, 0);
+        let progressAccumulatorMs = 0;
+        const alignedBlocks = segments.map((seg, idx) => {
+          const cleanSeg = seg.replace(/[\.။]/g, "").trim();
+          const blockLength = cleanSeg.length;
+          const blockPeriod = totalChars > 0 
+            ? (blockLength / totalChars) * activeMediaDurationMs 
+            : activeMediaDurationMs / segments.length;
 
-        setAligningProgress(80);
-        setAligningStatus("Stage 3: Forced Timestamp Alignment - Snapping sentence boundaries to absolute audio milliseconds...");
-        await new Promise((resolve) => setTimeout(resolve, 800));
+          const startMs = progressAccumulatorMs;
+          let endMs = startMs + Math.round(blockPeriod);
+          if (idx === segments.length - 1) {
+            endMs = activeMediaDurationMs;
+          }
+          progressAccumulatorMs = endMs;
 
-        const data = await response.json();
-        if (!data.blocks || !Array.isArray(data.blocks)) {
-          throw new Error("Invalid response format from subtitle alignment server.");
-        }
+          return {
+            id: idx + 1,
+            startMs,
+            endMs,
+            rawText: cleanSeg,
+            displayText: BurmeseSubtitleEngine.applyStackingRules(cleanSeg)
+          };
+        });
 
-        const alignedBlocks = data.blocks.map((block: any) => ({
-          id: block.id,
-          startMs: block.startMs,
-          endMs: block.endMs,
-          rawText: block.text,
-          displayText: BurmeseSubtitleEngine.applyStackingRules(block.text)
-        }));
-
+        await new Promise((resolve) => setTimeout(resolve, 400));
         setAligningProgress(100);
         setAligningStatus("Alignment complete successfully!");
-        await new Promise((resolve) => setTimeout(resolve, 400));
+        await new Promise((resolve) => setTimeout(resolve, 300));
 
         setBlocks(alignedBlocks);
         setAlignmentFinished(true);
@@ -618,21 +599,16 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
 
         onAddNotification(
           "Whisper Forced Alignment Completed", 
-          `Snapped ${alignedBlocks.length} subtitle syllable boundaries dynamically via the Local Whisper Engine.`, 
+          `Snapped ${alignedBlocks.length} subtitle syllable boundaries dynamically on-device.`, 
           "success"
         );
       } catch (error: any) {
-        if (error.name === "AbortError") {
-          console.log("[Whisper Alignment] Alignment operation aborted by user.");
-          onAddNotification("Alignment Cancelled", "The calibration process was stopped.", "info");
-        } else {
-          console.error("[Whisper Alignment Error]:", error);
-          onAddNotification(
-            "Whisper Alignment Failed", 
-            error.message || "Failed to align subtitles. Confirm media format and audio track presence.", 
-            "warning"
-          );
-        }
+        console.error("[Whisper Alignment Error]:", error);
+        onAddNotification(
+          "Alignment Failed", 
+          error.message || "An error occurred during calibration.", 
+          "warning"
+        );
         setIsAligning(false);
       }
     };

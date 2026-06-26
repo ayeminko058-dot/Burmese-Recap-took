@@ -65,93 +65,25 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
         setTranslatedText("");
 
         try {
-          const response = await safeFetch(getApiUrl("/api/translate"), {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Gemini-API-Key": savedKey,
-            },
-            body: JSON.stringify({
-              text: inputText,
-              sourceLang,
-              targetLang,
-            }),
+          const { GoogleGenAI } = await import("@google/genai");
+          const ai = new GoogleGenAI({ apiKey: savedKey });
+          
+          const sourceDesc = sourceLang === "Auto Detect" ? "detect the source language" : `the source language is ${sourceLang}`;
+          const prompt = `You are a professional, high-fidelity universal translation engine. 
+Translate the following text into the target language "${targetLang}". 
+Note that ${sourceDesc}. 
+
+Deliver ONLY the direct translated text. Do not add any conversational replies, explanations, markdown formatting blocks (like \`\`\` or \`\`\`html), preamble, notes, or meta comments.
+
+Text to translate:
+${inputText}`;
+
+          const response = await ai.models.generateContent({
+            model: "gemini-flash-latest",
+            contents: prompt,
           });
 
-          const contentType = response.headers.get("content-type");
-          let data: any = {};
-          
-          if (contentType && contentType.includes("application/json")) {
-            data = await response.json().catch(() => ({}));
-          } else {
-            const rawText = await response.text().catch(() => "");
-            if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
-              throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
-            }
-            throw new Error(rawText.substring(0, 100) || "Gateway error from host.");
-          }
-
-          if (!response.ok) {
-            throw new Error(data.error || "တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
-          }
-
-          // Robust safety guard helper to parse and extract translated text
-          const parseAndFlattenResult = (input: any): string => {
-            if (!input) return "";
-            if (typeof input === "string") {
-              const trimmed = input.trim();
-              if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-                try {
-                  const parsed = JSON.parse(trimmed);
-                  return parseAndFlattenResult(parsed);
-                } catch {
-                  return input;
-                }
-              }
-              return input;
-            }
-            if (typeof input === "object") {
-              // Extract from candidate structure if returned nested
-              if (
-                input.candidates &&
-                Array.isArray(input.candidates) &&
-                input.candidates[0] &&
-                input.candidates[0].content &&
-                input.candidates[0].content.parts &&
-                Array.isArray(input.candidates[0].content.parts) &&
-                input.candidates[0].content.parts[0]
-              ) {
-                const part = input.candidates[0].content.parts[0];
-                if (typeof part === "string") return parseAndFlattenResult(part);
-                if (part && typeof part.text === "string") return parseAndFlattenResult(part.text);
-              }
-
-              const keysToCheck = ["translatedText", "translation", "text", "translated_text", "output", "result"];
-              for (const key of keysToCheck) {
-                if (input[key] !== undefined && input[key] !== null) {
-                  return parseAndFlattenResult(input[key]);
-                }
-              }
-
-              if (Array.isArray(input)) {
-                if (input.length > 0) return parseAndFlattenResult(input[0]);
-                return "";
-              }
-
-              if (typeof input.text === "string") {
-                return parseAndFlattenResult(input.text);
-              }
-
-              try {
-                return JSON.stringify(input);
-              } catch {
-                return "";
-              }
-            }
-            return String(input);
-          };
-
-          const finalTranslatedText = parseAndFlattenResult(data);
+          const finalTranslatedText = response.text?.trim() || "";
           
           if (!finalTranslatedText) {
             throw new Error("ဘာသာပြန်ဆိုချက် ရယူရန် ပျက်ကွက်ခဲ့ပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
@@ -162,7 +94,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           setStatus("completed");
           onAddNotification("Translation Success", "Translated successfully with Gemini.", "success");
         } catch (err: any) {
-          console.error(err);
+          console.error("Gemini Direct Translation failed:", err);
           setStatus("error");
           setErrorMessage(err.message || "An unexpected error occurred.");
           onAddNotification("Translation Failed", err.message || "Could not translate text.", "warning");
