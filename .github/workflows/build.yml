@@ -30,14 +30,22 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      - name: Setup Dynamic Gradle Tooling (Fix Corrupt Wrapper)
+      - name: Wipe Corrupt Wrapper Jar
+        run: |
+          # Completely remove the corrupt jar file from the workplace environment before setup
+          rm -f android/gradle/wrapper/gradle-wrapper.jar
+
+      - name: Setup Dynamic Gradle Tooling (Clean Installation)
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.7
+          generate-job-summary: false
 
       - name: Compile Native Debug APK
         run: |
           cd android
+          # Regenerate proper executable attributes
+          gradle wrapper --gradle-version 8.7
           chmod +x gradlew || true
           ./gradlew assembleDebug --no-daemon
 
