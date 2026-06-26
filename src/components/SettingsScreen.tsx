@@ -18,6 +18,10 @@ export default function SettingsScreen({
 }: SettingsScreenProps) {
   const [targetSdk, setTargetSdk] = useState("34");
   
+  // Server URL states
+  const [serverUrl, setServerUrl] = useState<string>("");
+  const [isCustomServerUrl, setIsCustomServerUrl] = useState<boolean>(false);
+  
   // Gemini Key credentials states
   const [apiKey, setApiKey] = useState<string>("");
   const [showKey, setShowKey] = useState<boolean>(false);
@@ -25,7 +29,7 @@ export default function SettingsScreen({
   const [validationStatus, setValidationStatus] = useState<"idle" | "validating" | "valid" | "unconfigured" | "invalid">("idle");
   const [validationError, setValidationError] = useState<string | null>(null);
 
-  // Load API key from local storage on component mount
+  // Load API key and server URL from local storage on component mount
   useEffect(() => {
     const savedKey = localStorage.getItem("gemini_api_key") || "";
     setApiKey(savedKey);
@@ -35,7 +39,38 @@ export default function SettingsScreen({
     } else {
       setValidationStatus("unconfigured");
     }
+
+    const savedServerUrl = localStorage.getItem("server_url") || "";
+    setServerUrl(savedServerUrl || "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+    setIsCustomServerUrl(!!savedServerUrl);
   }, []);
+
+  const handleSaveServerUrl = () => {
+    let cleanUrl = serverUrl.trim();
+    if (cleanUrl.endsWith("/")) {
+      cleanUrl = cleanUrl.slice(0, -1);
+    }
+    if (!cleanUrl) {
+      localStorage.removeItem("server_url");
+      setIsCustomServerUrl(false);
+      setServerUrl("https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+      onAddNotification("Server URL Reset", "Reset to default active Cloud Run server URL.", "info");
+    } else {
+      localStorage.setItem("server_url", cleanUrl);
+      setIsCustomServerUrl(true);
+      setServerUrl(cleanUrl);
+      onAddNotification("Server URL Saved", "API connection route updated to your custom node.", "success");
+    }
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const handleResetServerUrl = () => {
+    localStorage.removeItem("server_url");
+    setIsCustomServerUrl(false);
+    setServerUrl("https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app");
+    onAddNotification("Server URL Reset", "Reset to default active Cloud Run server URL.", "info");
+    window.dispatchEvent(new Event("storage"));
+  };
 
   const handleSaveKey = () => {
     if (!apiKey.trim()) {
@@ -219,6 +254,68 @@ export default function SettingsScreen({
                 Error log: {validationError}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Dedicated API Server Node Settings section */}
+        <div className="bg-[#1A2333]/90 border border-slate-800 rounded-2xl p-4 space-y-3.5" id="api-server-settings">
+          <div className="flex items-center justify-between select-none">
+            <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <Radio className="w-4 h-4 text-purple-400 animate-pulse" />
+              API Server Node Controller
+            </h3>
+            <span className="text-[9px] bg-slate-850 text-purple-400 py-0.5 px-2.5 rounded-full font-mono font-bold uppercase tracking-wider border border-purple-500/10">
+              GATEWAY SERVICE
+            </span>
+          </div>
+
+          <p className="text-[10px] text-slate-400 leading-relaxed font-sans text-left">
+            "Configure the hosted endpoint for server-side AI processing, Myanmar voice generation, and subtitle alignment operations. Default points directly to your Cloud Run environment."
+          </p>
+
+          <div className="space-y-3 font-medium select-none">
+            <div className="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+              <input
+                type="text"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder="https://your-cloud-run-url..."
+                className="bg-transparent text-xs text-white flex-1 px-1.5 outline-none font-mono placeholder-slate-700 select-text"
+              />
+            </div>
+
+            {/* Storage status visualizer */}
+            <div className="flex justify-between items-center text-[9px] font-mono text-slate-500">
+              <span>Connection Strategy:</span>
+              {isCustomServerUrl ? (
+                <span className="text-purple-400 font-bold">Custom Node Gateway</span>
+              ) : (
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Default Cloud Run
+                </span>
+              )}
+            </div>
+
+            {/* Actions deck buttons */}
+            <div className="grid grid-cols-2 gap-2 text-xs select-none">
+              <button
+                type="button"
+                onClick={handleSaveServerUrl}
+                className="bg-indigo-650 hover:bg-indigo-600 border border-indigo-550/20 text-white text-[10px] font-bold py-2 rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer"
+                id="save-server-btn"
+              >
+                Save Route
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleResetServerUrl}
+                className="bg-[#0D1321] border border-slate-850 text-slate-300 hover:border-slate-700 text-[10px] py-1.5 rounded-xl font-bold transition duration-150 active:scale-95 text-center cursor-pointer"
+                id="reset-server-btn"
+              >
+                Reset Default
+              </button>
+            </div>
           </div>
         </div>
 
