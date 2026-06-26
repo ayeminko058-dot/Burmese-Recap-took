@@ -55,17 +55,10 @@ jobs:
         run: |
           npm run build
 
-      - name: Check/Add Capacitor Android Platform
+      - name: Install @capacitor/android and Initialize Platform
         run: |
-          if [ ! -d "android" ]; then
-            echo "Android native platform folder is missing. Instantiating via Capacitor CLI..."
-            npx cap add android
-          else
-            echo "Android native platform folder already checked into repository."
-          fi
-
-      - name: Sync Web Assets to Native Android Project
-        run: |
+          npm install @capacitor/android --legacy-peer-deps
+          npx cap add android || true
           npx cap sync android
 
       - name: Setup Gradle Cache and Tooling
