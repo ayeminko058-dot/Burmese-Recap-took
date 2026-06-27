@@ -17,10 +17,15 @@ dotenv.config();
 async function generateContentWithRetry(
   ai: any,
   options: { model: string; contents: any; config?: any },
-  retries = 3,
-  delayMs = 1500
+  retries = 6,
+  delayMs = 1000
 ): Promise<any> {
-  const fallbackSequence = ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest"];
+  const fallbackSequence = [
+    "gemini-3.5-flash", 
+    "gemini-2.5-flash", 
+    "gemini-3.1-flash-lite", 
+    "gemini-flash-latest"
+  ];
   let attempt = 0;
   let lastError: any = null;
   let currentModel = options.model;
@@ -37,25 +42,22 @@ async function generateContentWithRetry(
       lastError = err;
       attempt++;
       
-      const isTransient = 
-        err.status === 503 || 
-        err.statusCode === 503 ||
-        err.status === 429 ||
-        err.statusCode === 429 ||
-        (err.message && (
-          err.message.includes("503") || 
-          err.message.includes("429") || 
-          err.message.includes("high demand") || 
-          err.message.includes("temporary") ||
-          err.message.includes("quota") || 
-          err.message.includes("UNAVAILABLE") ||
-          err.message.includes("RESOURCE_EXHAUSTED")
-        ));
+      const errMsg = err.message || String(err);
+      const isApiKeyError = errMsg.includes("API_KEY_INVALID") || 
+                            errMsg.includes("API key not valid") || 
+                            errMsg.includes("invalid key") || 
+                            errMsg.includes("invalid API key");
+
+      const isBadRequest = err.status === 400 || err.statusCode === 400;
+
+      // Treat any error other than a hard invalid API key or bad schema request as transient/retryable
+      const isTransient = !isApiKeyError && !isBadRequest;
 
       if (isTransient) {
-        console.log(`[Gemini API Status] Attempt ${attempt} encountered transient busy status (503/429/busy). Auto-switching/retrying...`);
+        console.log(`[Gemini API Status] Attempt ${attempt} encountered retryable status. Auto-switching/retrying... Error details: ${errMsg}`);
       } else {
-        console.log(`[Gemini API Status] Attempt ${attempt} encountered potential error: ${err.message || err}`);
+        console.log(`[Gemini API Status] Attempt ${attempt} encountered a hard/non-retryable error: ${errMsg}`);
+        throw err;
       }
 
       if (isTransient && attempt < retries) {
@@ -65,9 +67,11 @@ async function generateContentWithRetry(
           const nextModel = fallbackSequence[currentIndex + 1];
           console.log(`[Gemini API Status] Dynamic fallback: switching model to ${nextModel} for retry.`);
           currentModel = nextModel;
-        } else if (currentIndex === -1) {
-          console.log(`[Gemini API Status] Custom model failed. Falling back to gemini-3.1-flash-lite.`);
-          currentModel = "gemini-3.1-flash-lite";
+        } else {
+          // If the model was not in our standard sequence or we reached the end, cycle back or use gemini-2.5-flash as default fallback
+          const fallbackModel = "gemini-2.5-flash";
+          console.log(`[Gemini API Status] Fallback boundary reached. Switching to safe default model ${fallbackModel}`);
+          currentModel = fallbackModel;
         }
         
         console.log(`[Gemini API Status] Waiting ${delayMs}ms before retrying...`);

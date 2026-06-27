@@ -45,6 +45,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   const [progressLog, setProgressLog] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const compiledBlobRef = useRef<Blob | null>(null);
 
   const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
     if (typeof (window as any).customAlert === "function") {
@@ -231,6 +232,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
       await new Promise((resolve) => setTimeout(resolve, 600));
 
       const audioBlob = new Blob(chunkBuffers, { type: "audio/mpeg" });
+      compiledBlobRef.current = audioBlob;
       if (!audioBlob || audioBlob.size === 0) {
         throw new Error("Received an empty audio binary stream from synthesis server.");
       }
@@ -535,7 +537,18 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
               src={syncedAudioUrl} 
               className="hidden" 
               onEnded={() => setAudioPlayState(false)} 
-              onError={() => {
+              onError={async () => {
+                if (syncedAudioUrl && syncedAudioUrl.startsWith("blob:") && compiledBlobRef.current) {
+                  console.warn("[TtsStudio] Object URL playback blocked or failed. Activating Base64 fallback decoding pipeline...");
+                  const reader = new FileReader();
+                  reader.onloadend = () => {
+                    const base64DataUrl = reader.result as string;
+                    setSyncedAudioUrl(base64DataUrl);
+                  };
+                  reader.readAsDataURL(compiledBlobRef.current);
+                  return;
+                }
+
                 console.error("Audio playback error: Failed to load audio source or unsupported format");
                 setAudioPlayState(false);
                 onAddNotification(
