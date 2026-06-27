@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { 
-  Volume2, Play, Pause, Download, Settings, Disc, Sparkles, RefreshCw, Layers, CheckCircle 
+  Volume2, Play, Pause, Download, Disc, Sparkles, RefreshCw, CheckCircle, AlertTriangle 
 } from "lucide-react";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { Capacitor } from "@capacitor/core";
@@ -30,44 +30,27 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   );
   const [selectedVoice, setSelectedVoice] = useState("my-MM-NilarNeural");
   const [selectedStyle, setSelectedStyle] = useState("general");
-  const [isSynthesizing, setIsSynthesizing] = useState(false);
-  const [syncedAudioUrl, setSyncedAudioUrl] = useState<string | null>(null);
-  const [activeObjectUrl, setActiveObjectUrl] = useState<string | null>(null);
-  const [audioPlayState, setAudioPlayState] = useState(false);
-
-  // Maintain a record of all created object URLs to revoke them strictly on unmount (preventing early GC interruption)
-  const createdObjectUrlsRef = useRef<string[]>([]);
-
+  
+  // Rebuild the UI with precise states: 'idle' | 'loading' | 'success' | 'failure'
+  const [synthesisState, setSynthesisState] = useState<"idle" | "loading" | "success" | "failure">("idle");
   const [progressLog, setProgressLog] = useState("");
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [syncedAudioUrl, setSyncedAudioUrl] = useState<string | null>(null);
+  const [vocalBase64, setVocalBase64] = useState<string>("");
+  const [audioPlayState, setAudioPlayState] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const compiledBlobRef = useRef<Blob | null>(null);
 
-  // Auto-play / Explicit load pipeline on audio source changes (designed for mobile browsers/WebViews)
+  // Clean up Object URL on unmount to prevent leaks
   useEffect(() => {
-    if (syncedAudioUrl && audioRef.current) {
-      console.log("[TtsStudio] Syncing audio URL change. Invoking load() and play()...");
-      try {
-        audioRef.current.load();
-        
-        // Ensure play is triggered inside a robust try-catch handler to gracefully survive gesture blockages
-        const playPromise = audioRef.current.play();
-        if (playPromise !== undefined) {
-          playPromise
-            .then(() => {
-              console.log("[TtsStudio] Playback started successfully.");
-              setAudioPlayState(true);
-            })
-            .catch((err) => {
-              console.warn("[TtsStudio] Direct autoplay blocked or interrupted by gesture restriction:", err);
-              setAudioPlayState(false);
-            });
-        }
-      } catch (err) {
-        console.error("[TtsStudio] Failed to load/play audio on URL sync:", err);
-        setAudioPlayState(false);
+    return () => {
+      if (syncedAudioUrl && syncedAudioUrl.startsWith("blob:")) {
+        URL.revokeObjectURL(syncedAudioUrl);
       }
-    }
+    };
   }, [syncedAudioUrl]);
 
   const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
@@ -81,272 +64,166 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   const charCount = text.length;
   const chunkEstimate = Math.ceil(charCount / 180);
 
+  // Convert ArrayBuffer to Base64 in a fast, mobile-friendly standard implementation
+  const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+    let binary = "";
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    for (let i = 0; i < len; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return window.btoa(binary);
+  };
+
   const handleSynthesizeTts = async () => {
     if (!text.trim()) return;
-    setIsSynthesizing(true);
+
+    setSynthesisState("loading");
+    setErrorMessage(null);
     setAudioPlayState(false);
     setSyncedAudioUrl(null);
-    setProgressLog("Splitting Script...");
+    setVocalBase64("");
+    setProgressLog("Analyzing Burmese syntax clauses...");
 
     try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      setProgressLog("Synthesizing Audio Streams in Parallel...");
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      setProgressLog("Submitting script to high-speed synthesizer...");
 
-      const normalizedStyle = selectedStyle.toLowerCase();
-      let computedRate = "+0%";
-      let computedPitch = "+0Hz";
-
-      if (
-        normalizedStyle.includes("cheerful") ||
-        normalizedStyle.includes("တက်ကြွသံ") ||
-        normalizedStyle.includes("ပျော်ရွှင်သံ")
-      ) {
-        computedRate = "+12%";
-        computedPitch = "+6Hz";
-      } else if (
-        normalizedStyle.includes("newscast") ||
-        normalizedStyle.includes("သတင်းဖတ်သံ")
-      ) {
-        computedRate = "+5%";
-        computedPitch = "-2Hz";
-      } else if (
-        normalizedStyle.includes("chat") ||
-        normalizedStyle.includes("စကားပြောသံ") ||
-        normalizedStyle.includes("စကားပြော")
-      ) {
-        computedRate = "+8%";
-        computedPitch = "+0Hz";
-      } else {
-        computedRate = "+0%";
-        computedPitch = "+0Hz";
-      }
-
-      // Replicate sentence-splitting and chunking from server.ts directly on the client
-      const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
-      const cleanedChunks: string[] = [];
-      let currentChunk = "";
-      let currentLinesCount = 0;
-
-      for (let sentence of sentences) {
-        if (sentence.length > 1800) {
-          if (currentChunk) {
-            cleanedChunks.push(currentChunk.trim());
-            currentChunk = "";
-            currentLinesCount = 0;
-          }
-          let temp = sentence;
-          while (temp.length > 1800) {
-            cleanedChunks.push(temp.slice(0, 1800));
-            temp = temp.slice(1800);
-          }
-          sentence = temp;
-          if (!sentence) continue;
-        }
-
-        if (currentChunk && (currentChunk.length + sentence.length + 1 > 1800 || currentLinesCount >= 10)) {
-          cleanedChunks.push(currentChunk.trim());
-          currentChunk = sentence;
-          currentLinesCount = 1;
-        } else {
-          if (currentChunk) {
-            const lastChar = currentChunk[currentChunk.length - 1];
-            const needsSpace = !/[။\s]/.test(lastChar);
-            currentChunk += (needsSpace ? " " : "") + sentence;
-          } else {
-            currentChunk = sentence;
-          }
-          currentLinesCount++;
-        }
-      }
-      if (currentChunk.trim()) {
-        cleanedChunks.push(currentChunk.trim());
-      }
-
-      if (cleanedChunks.length === 0) {
-        throw new Error("The provided text contains no speakable characters.");
-      }
-
-      setProgressLog(`Synthesizing ${cleanedChunks.length} speech chunks directly from Edge-TTS...`);
-
-      const fetchHeaders: Record<string, string> = {
-        "Accept": "audio/mpeg, */*"
-      };
-
-      let chunkBuffers: ArrayBuffer[] = [];
-
-      setProgressLog(`Parallel synthesis via Microsoft Edge-TTS (0% middleman overhead)...`);
-      const chunkPromises = cleanedChunks.map(async (chunkText, index) => {
-        const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-        const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(computedRate)}&pitch=${encodeURIComponent(computedPitch)}`;
-        
-        let lastErr: any = null;
-        for (let attempt = 1; attempt <= 3; attempt++) {
-          try {
-            let response: Response;
-            
-            if (attempt === 1) {
-              // Direct fetch from Edge-TTS to satisfy physical device direct delivery
-              response = await fetch(ttsUrl, { headers: fetchHeaders });
-            } else {
-              // Graceful fallback to our Express backend proxy for web preview to completely bypass CORS / "Failed to fetch" blockages
-              const proxyUrl = getApiUrl("/api/tts");
-              response = await safeFetch(proxyUrl, {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  ...fetchHeaders
-                },
-                body: JSON.stringify({
-                  text: chunkText,
-                  voice: selectedVoice,
-                  rate: computedRate,
-                  pitch: computedPitch,
-                })
-              });
-            }
-
-            if (!response.ok) {
-              throw new Error(`HTTP status ${response.status}`);
-            }
-
-            let arrayBuffer: ArrayBuffer;
-            if (attempt === 1) {
-              const contentType = response.headers.get("content-type") || "";
-              if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml") || contentType.includes("text/plain") || contentType.includes("application/json")) {
-                throw new Error("Edge-TTS API returned text/HTML content instead of a valid audio stream.");
-              }
-              arrayBuffer = await response.arrayBuffer();
-            } else {
-              const blob = await response.blob();
-              arrayBuffer = await blob.arrayBuffer();
-            }
-
-            if (arrayBuffer.byteLength === 0) {
-              throw new Error("Received an empty audio buffer.");
-            }
-            
-            // Check first 150 bytes of the generated chunk to verify it's not a text/HTML error response masquerading as audio
-            const chunkSample = new Uint8Array(arrayBuffer.slice(0, 150));
-            const chunkSampleText = new TextDecoder().decode(chunkSample).trim();
-            if (
-              chunkSampleText.startsWith("<!") || 
-              chunkSampleText.startsWith("<html") || 
-              chunkSampleText.startsWith("<HTML") || 
-              chunkSampleText.startsWith("{") || 
-              chunkSampleText.startsWith("[")
-            ) {
-              throw new Error("Received text/HTML error page content in chunk stream.");
-            }
-
-            return arrayBuffer;
-          } catch (err: any) {
-            lastErr = err;
-            console.warn(`[TTS Chunk ${index} Attempt ${attempt}] Failed: ${err.message || err}`);
-            if (attempt < 3) {
-              await new Promise(resolve => setTimeout(resolve, 600 * attempt));
-            }
-          }
-        }
-        throw lastErr || new Error("Unknown synthesis error");
+      const generateVoiceApiUrl = getApiUrl("/api/generate-voice");
+      
+      const response = await safeFetch(generateVoiceApiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          text,
+          voice: selectedVoice,
+          style: selectedStyle,
+        })
       });
-      chunkBuffers = await Promise.all(chunkPromises);
 
-      setProgressLog("Merging Final MP3 Voice...");
-      await new Promise((resolve) => setTimeout(resolve, 600));
-
-      const audioBlob = new Blob(chunkBuffers, { type: "audio/mpeg" });
-      compiledBlobRef.current = audioBlob;
-      if (!audioBlob || audioBlob.size === 0) {
-        throw new Error("Received an empty audio binary stream from synthesis server.");
-      }
-
-      // Check first 150 bytes of the generated blob to verify it's not a text/HTML error response masquerading as audio
-      const sampleText = await audioBlob.slice(0, 150).text().catch(() => "");
-      const trimmedSample = sampleText.trim();
-      if (
-        trimmedSample.startsWith("<!") || 
-        trimmedSample.startsWith("<html") || 
-        trimmedSample.startsWith("<HTML") || 
-        trimmedSample.startsWith("{") || 
-        trimmedSample.startsWith("[")
-      ) {
-        throw new Error("Synthesis failed: The server returned a text/HTML error instead of valid audio binary stream.");
-      }
-
-      // Avoid aggressive immediate revocation of activeObjectUrl so current playback/buffering isn't broken
-      const isNative = Capacitor.isNativePlatform();
-      const isMobile = typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
-
-      if (isNative || isMobile) {
-        setProgressLog("Encoding audio stream to reliable Base64 format...");
-        // Convert audio binary stream (Blob) into a clean Base64 Data URI stream immediately in the client via FileReader to guarantee cross-platform support in mobile browsers/WebViews
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          let base64DataUrl = reader.result as string;
-          if (base64DataUrl.startsWith("data:audio/mpeg;")) {
-            base64DataUrl = base64DataUrl.replace("data:audio/mpeg;", "data:audio/mp3;");
+      const contentType = response.headers.get("content-type") || "";
+      
+      if (!response.ok) {
+        // If server failed, try to parse JSON error message
+        let errorMsg = "Server Network Error: Failed to generate audio track.";
+        if (contentType.includes("application/json")) {
+          const errData = await response.json();
+          errorMsg = errData?.error?.message || errorMsg;
+        } else {
+          const rawText = await response.text();
+          if (rawText.startsWith("<!doctype") || rawText.startsWith("<html")) {
+            throw new Error("Server Network Error: Expected JSON, but received HTML error page.");
           }
-          setSyncedAudioUrl(base64DataUrl);
-          setProgressLog("");
-          setIsSynthesizing(false);
-          onAddNotification(
-            "Vocal Track Generated",
-            "Synthesized speech successfully. Preparing audio...",
-            "success"
-          );
-
-          // Register inside files list
-          const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
-          onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", base64DataUrl);
-        };
-        reader.onerror = () => {
-          throw new Error("Failed to compile audio stream into Base64 format.");
-        };
-        reader.readAsDataURL(audioBlob);
-      } else {
-        // Use highly optimized, native Object URL in the web preview to prevent Base64 string decoder limits and unsupported source errors
-        const audioUrl = URL.createObjectURL(audioBlob);
-        createdObjectUrlsRef.current.push(audioUrl); // Track for unmount cleanup
-        setActiveObjectUrl(audioUrl);
-        setSyncedAudioUrl(audioUrl);
-        setProgressLog("");
-        setIsSynthesizing(false);
-        onAddNotification(
-          "Vocal Track Generated",
-          "Synthesized speech successfully. Preparing audio...",
-          "success"
-        );
-
-        const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
-        onAddDownloadedFile(fileName, audioUrl, "audio", audioUrl);
+        }
+        throw new Error(errorMsg);
       }
-    } catch (err: any) {
-      console.error(err);
+
+      setProgressLog("Processing generated audio metadata...");
+      const result = await response.json();
+
+      if (!result.success || !result.audioUrl) {
+        throw new Error(result.error?.message || "Vocal synthesis pipeline failed on server.");
+      }
+
+      setProgressLog("Setting up streaming audio track...");
+      setVocalBase64(result.base64Data || "");
+
+      // Store blob ref for compatibility (reconstruct from Base64 fallback if needed)
+      if (result.base64Data) {
+        try {
+          const byteCharacters = atob(result.base64Data);
+          const byteNumbers = new Array(byteCharacters.length);
+          for (let i = 0; i < byteCharacters.length; i++) {
+            byteNumbers[i] = byteCharacters.charCodeAt(i);
+          }
+          const byteArray = new Uint8Array(byteNumbers);
+          compiledBlobRef.current = new Blob([byteArray], { type: "audio/mpeg" });
+        } catch (e) {
+          console.warn("[TtsStudio] Failed to build compiledBlobRef from base64 fallback:", e);
+        }
+      }
+
+      const streamUrl = getApiUrl(result.audioUrl);
+      setSyncedAudioUrl(streamUrl);
+      setSynthesisState("success");
       setProgressLog("");
-      setIsSynthesizing(false);
-      onAddNotification("Synthesis Failed", "Please verify internet connection or API settings.", "warning");
+
+      onAddNotification(
+        "Vocal Track Generated",
+        "Synthesized Burmese speech successfully. Preparing audio...",
+        "success"
+      );
+
+      // Register inside files list
+      const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
+      onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", streamUrl);
+
+      // Trigger automatic bypass of mobile play restrictions
+      setTimeout(() => {
+        if (audioRef.current) {
+          try {
+            audioRef.current.load();
+            const playPromise = audioRef.current.play();
+            if (playPromise !== undefined) {
+              playPromise
+                .then(() => {
+                  setAudioPlayState(true);
+                })
+                .catch((playErr) => {
+                  console.warn("[TtsStudio] Autoplay gesture restriction occurred:", playErr);
+                  setAudioPlayState(false);
+                });
+            }
+          } catch (e) {
+            console.warn("[TtsStudio] Trigger load/play exception ignored:", e);
+          }
+        }
+      }, 200);
+
+    } catch (err: any) {
+      console.error("[TtsStudio Synthesis Error]:", err);
+      const displayErr = err.message || "Please verify internet connection or API settings.";
+      setErrorMessage(displayErr);
+      setSynthesisState("failure");
+      setProgressLog("");
+      onAddNotification("Synthesis Failed", displayErr, "warning");
     }
   };
 
   const togglePlayback = () => {
-    if (!audioRef.current) return;
-    if (audioPlayState) {
-      audioRef.current.pause();
+    if (!audioRef.current || !syncedAudioUrl) return;
+
+    try {
+      if (audioPlayState) {
+        audioRef.current.pause();
+        setAudioPlayState(false);
+      } else {
+        // Mobile Restrictions Bypass: Call load() right before play()
+        audioRef.current.load();
+        
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              setAudioPlayState(true);
+            })
+            .catch((err) => {
+              console.warn("[TtsStudio] Playback gesture restriction encountered:", err);
+              setAudioPlayState(false);
+              onAddNotification("Play Blocked", "Please interact with the screen first to play audio.", "info");
+            });
+        }
+      }
+    } catch (err) {
+      console.error("[TtsStudio Playback Exception]:", err);
       setAudioPlayState(false);
-    } else {
-      audioRef.current.play()
-        .then(() => {
-          setAudioPlayState(true);
-        })
-        .catch((err) => {
-          console.warn("[TtsStudio] Direct audio play rejected/failed:", err);
-          setAudioPlayState(false);
-        });
     }
   };
 
   const handleDownloadMp3 = () => {
-    if (!syncedAudioUrl) return;
+    if (!vocalBase64 && !syncedAudioUrl) return;
 
     triggerInterstitialAd(
       "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး MP3 အခမဲ့ဒေါင်းလုဒ်ဆွဲပါ",
@@ -354,15 +231,17 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         setIsDownloading(true);
         const fileName = `ZoeRecap_${Date.now()}.mp3`;
         try {
-          let base64Data = "";
-          if (syncedAudioUrl.startsWith("data:")) {
-            const commaIndex = syncedAudioUrl.indexOf(",");
-            base64Data = syncedAudioUrl.substring(commaIndex + 1);
-          } else {
-            base64Data = syncedAudioUrl;
+          let base64Data = vocalBase64;
+          if (!base64Data && syncedAudioUrl) {
+            if (syncedAudioUrl.startsWith("data:")) {
+              const commaIndex = syncedAudioUrl.indexOf(",");
+              base64Data = syncedAudioUrl.substring(commaIndex + 1);
+            } else {
+              base64Data = syncedAudioUrl;
+            }
           }
 
-          // Write natively to external storage Download folder
+          // Save natively to device Storage Downloads folder via Capacitor
           await Filesystem.writeFile({
             path: `Download/${fileName}`,
             data: base64Data,
@@ -377,7 +256,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
           console.warn("[File System Fallback] Native directories unavailable, writing via browser anchor:", err);
           try {
             const link = document.createElement("a");
-            link.href = syncedAudioUrl;
+            link.href = syncedAudioUrl || `data:audio/mp3;base64,${vocalBase64}`;
             link.download = fileName;
             document.body.appendChild(link);
             link.click();
@@ -397,269 +276,212 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
     );
   };
 
-  useEffect(() => {
-    // Sync current audio state on standard HTML5 timeline termination
-    const handleEnded = () => setAudioPlayState(false);
-    const audioNode = audioRef.current;
-    if (audioNode) {
-      audioNode.addEventListener("ended", handleEnded);
-    }
-    return () => {
-      if (audioNode) {
-        audioNode.removeEventListener("ended", handleEnded);
-      }
-    };
-  }, [syncedAudioUrl]);
-
-  // Stop background audio if navigating away or unmounting
-  useEffect(() => {
-    if (!isActive && audioRef.current) {
-      try {
-        audioRef.current.pause();
-        audioRef.current.currentTime = 0;
-        setAudioPlayState(false);
-      } catch (e) {
-        console.warn("Error pausing tts audio on deactivation:", e);
-      }
-    }
-  }, [isActive]);
-
-  useEffect(() => {
-    return () => {
-      // Revoke all created Object URLs strictly when the component unmounts
-      createdObjectUrlsRef.current.forEach((url) => {
-        try {
-          URL.revokeObjectURL(url);
-        } catch (e) {
-          console.warn("[TtsStudio] Failed to revoke URL on unmount:", url, e);
-        }
-      });
-
-      if (audioRef.current) {
-        try {
-          audioRef.current.pause();
-          audioRef.current.removeAttribute("src");
-          audioRef.current.load();
-        } catch (e) {
-          // ignore
-        }
-      }
-    };
-  }, []);
-
   return (
-    <div className="flex flex-col h-full overflow-hidden text-slate-100 font-sans" id="tts-studio">
-      <div className="p-2 border-b border-[#1E293B] bg-[#0D1321] shrink-0">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            <div className="p-0.5 rounded-md bg-blue-500/10 text-blue-400">
-              <Volume2 className="w-4 h-4 animate-pulse" />
+    <div className="h-full overflow-y-auto px-4 py-3 space-y-4 text-slate-200">
+      {/* Title Header banner */}
+      <div className="flex items-center gap-2.5 bg-gradient-to-r from-blue-900/40 to-slate-900 border border-blue-500/10 rounded-2xl p-3.5 shadow-md">
+        <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">
+          <Volume2 className="w-5 h-5" />
+        </div>
+        <div>
+          <h2 className="text-sm font-semibold tracking-tight text-white flex items-center gap-1.5">
+            Burmese Recap Studio <span className="text-[9px] bg-blue-500/20 text-blue-300 font-medium px-2 py-0.5 rounded-full uppercase">PWA</span>
+          </h2>
+          <p className="text-[10px] text-slate-400">Transform storytelling scripts into voice narrations</p>
+        </div>
+      </div>
+
+      {/* Voice Controls */}
+      <div className="bg-[#131926]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3.5 shadow-sm">
+        <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+          <Sparkles className="w-3 h-3 text-indigo-400 animate-pulse" /> Configure Voice Attributes
+        </span>
+        
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-slate-400 font-medium">Select Actor (မြန်မာအသံ)</label>
+            <div className="relative">
+              <select
+                value={selectedVoice}
+                onChange={(e) => setSelectedVoice(e.target.value)}
+                className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+              >
+                {VOICE_MATRIX.map((v) => (
+                  <option key={v.code} value={v.code} className="bg-[#1A2333]">
+                    {v.flag} {v.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <div>
-              <h2 className="text-xs font-semibold tracking-wide text-slate-100">Text to Voice Studio</h2>
-              <p className="text-[8px] text-slate-450">Ultra Long-form Myanmar Voice Engrave</p>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="text-[10px] text-slate-400 font-medium">Vocal Expression (အသံပုံစံ)</label>
+            <div className="relative">
+              <select
+                value={selectedStyle}
+                onChange={(e) => setSelectedStyle(e.target.value)}
+                className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
+              >
+                <option value="general" className="bg-[#1A2333]">General (ရိုးရိုး)</option>
+                <option value="chat" className="bg-[#1A2333]">Chat (စကားပြော)</option>
+                <option value="newscast" className="bg-[#1A2333]">Newscast (သတင်းဖတ်သံ)</option>
+                <option value="cheerful" className="bg-[#1A2333]">Cheerful (ပျော်ရွှင်သံ)</option>
+              </select>
             </div>
           </div>
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-3 pb-36 space-y-3 bg-[#070B13]">
-        {/* Voice setup */}
-        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-              <Layers className="w-3 h-3 text-blue-400" />
-              Target Speaker Matrix
-            </span>
-          </div>
-
-          <div className="space-y-2.5">
-            <div className="space-y-0.5">
-              <label className="text-[9.5px] text-slate-400 font-medium font-sans">Voice Speaker (အသံရွေးချယ်ရန်)</label>
-              <div className="relative">
-                <select
-                  value={selectedVoice}
-                  onChange={(e) => setSelectedVoice(e.target.value)}
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
-                >
-                  {VOICE_MATRIX.map((v) => (
-                    <option key={v.code} value={v.code} className="bg-[#1A2333]">
-                      {v.flag} {v.name} ({v.language})
-                    </option>
-                  ))}
-                </select>
-                <div className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-slate-400">
-                  <Settings className="w-3 h-3" />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-0.5">
-              <label className="text-[9.5px] text-slate-400 font-medium font-sans">Voice Style (အသံအနေအထားပုံစံ)</label>
-              <div className="relative">
-                <select
-                  value={selectedStyle}
-                  onChange={(e) => setSelectedStyle(e.target.value)}
-                  className="w-full bg-[#0D1321] border border-[#1E293B] text-xs text-slate-200 rounded-lg py-2 px-2.5 focus:outline-none focus:border-blue-500 appearance-none transition-colors"
-                >
-                  <option value="general" className="bg-[#1A2333]">General (ရိုးရိုး)</option>
-                  <option value="chat" className="bg-[#1A2333]">Chat (စကားပြော)</option>
-                  <option value="customerservice" className="bg-[#1A2333]">Customer Service (ဝန်ဆောင်မှုအသံ)</option>
-                  <option value="newscast" className="bg-[#1A2333]">Newscast (သတင်းဖတ်သံ)</option>
-                  <option value="cheerful" className="bg-[#1A2333]">Cheerful (ပျော်ရွှင်သံ)</option>
-                  <option value="empathetic" className="bg-[#1A2333]">Empathetic (စာနာသံ)</option>
-                </select>
-                <div className="absolute inset-y-0 right-2.5 flex items-center pointer-events-none text-slate-400">
-                  <Sparkles className="w-3 h-3 text-indigo-400" />
-                </div>
-              </div>
-            </div>
-          </div>
+      {/* Script Area */}
+      <div className="bg-[#131926]/90 border border-[#1E293B] rounded-2xl p-3.5 space-y-3.5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <span className="text-[9px] font-bold uppercase tracking-wider text-slate-400">
+            Movie Narration Script (ဇာတ်လမ်းပြောစာသား)
+          </span>
+          <span className="text-[9px] text-slate-400 font-mono">
+            Length: <b className="text-blue-400 font-semibold">{charCount}</b> chars
+          </span>
         </div>
 
-        {/* Text Area */}
-        <div className="bg-[#1A2333]/90 border border-[#1E293B] rounded-xl p-3 space-y-2.5">
+        <textarea
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="ဒီနေရာမှာ ဇာတ်လမ်းပြောဇာတ်ညွှန်းကို ရိုက်ထည့်ပါ..."
+          maxLength={10000}
+          rows={5}
+          className="w-full bg-[#0D1321]/80 border border-[#1E293B] text-xs text-slate-200 rounded-xl p-3 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500"
+        />
+
+        <div className="flex items-center justify-between text-[10px] text-slate-400">
+          <span>Clause Splits: <b className="text-slate-300 font-mono">{chunkEstimate} parts</b></span>
+          <span className="text-blue-400 font-medium">Auto-chunking enabled</span>
+        </div>
+
+        <button
+          onClick={handleSynthesizeTts}
+          disabled={synthesisState === "loading" || !text.trim()}
+          className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs py-3 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 active:scale-[0.98] shadow-md shadow-blue-950/20"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${synthesisState === "loading" ? "animate-spin" : ""}`} />
+          {synthesisState === "loading" ? "Synthesizing vocal waves..." : "Synthesize MP3 Voice"}
+        </button>
+      </div>
+
+      {/* REBUILD THE UI WITH LOADING, SUCCESS, FAILURE STATES */}
+
+      {/* LOADING STATE */}
+      {synthesisState === "loading" && (
+        <div className="bg-blue-950/20 border border-blue-500/20 rounded-2xl p-4 text-center flex flex-col items-center justify-center space-y-2.5 animate-pulse shadow-sm">
+          <Disc className="w-5 h-5 text-blue-400 animate-spin" />
+          <p className="text-[10px] font-mono text-blue-300 tracking-wide">{progressLog}</p>
+        </div>
+      )}
+
+      {/* FAILURE STATE */}
+      {synthesisState === "failure" && (
+        <div className="bg-red-950/30 border border-red-500/30 rounded-2xl p-4 space-y-2.5 shadow-sm">
+          <div className="flex items-center gap-2 text-red-400 text-xs font-semibold">
+            <AlertTriangle className="w-4 h-4 text-red-500 shrink-0" />
+            <span>Synthesis Pipeline Interrupted</span>
+          </div>
+          <p className="text-[10px] font-mono text-red-300 bg-red-950/40 p-2.5 rounded-lg border border-red-500/10 leading-relaxed">
+            {errorMessage || "Failed to load audio source or unsupported format"}
+          </p>
+          <button
+            onClick={handleSynthesizeTts}
+            className="w-full bg-red-900/30 hover:bg-red-900/50 text-red-300 border border-red-500/20 rounded-lg text-[10px] font-semibold py-1.5 transition-colors"
+          >
+            Retry Generation (ပြန်လည်ပြုလုပ်ရန်)
+          </button>
+        </div>
+      )}
+
+      {/* SUCCESS STATE */}
+      {synthesisState === "success" && syncedAudioUrl && (
+        <div className="bg-emerald-950/20 border border-emerald-500/20 rounded-2xl p-4 space-y-3.5 shadow-lg">
           <div className="flex items-center justify-between">
-            <span className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
-              Voice Script (Supports 10,000+ chars)
+            <span className="text-[9px] font-bold text-emerald-400 flex items-center gap-1.5">
+              <CheckCircle className="w-3.5 h-3.5 text-emerald-500" />
+              VOCAL STREAM MIXER READY
             </span>
-            <span className="text-[8px] text-slate-400 font-mono">
-              Chars: <b className="text-blue-400">{charCount}</b>
-            </span>
+            <span className="text-[8px] font-mono text-slate-500">MPEG Layer-3</span>
           </div>
 
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="Introduce long script segments here..."
-            maxLength={11000}
-            rows={4}
-            className="w-full bg-[#0D1321]/60 border border-[#1E293B] text-xs text-slate-200 rounded-lg p-2.5 focus:outline-none focus:border-blue-500 transition-colors leading-relaxed placeholder-slate-500"
+          <audio 
+            ref={audioRef} 
+            src={syncedAudioUrl} 
+            className="hidden" 
+            onEnded={() => setAudioPlayState(false)} 
+            onError={(e) => {
+              const errorObj = e.currentTarget.error;
+              console.error("[TtsStudio] Audio element failed to play:", errorObj?.code, errorObj?.message);
+              
+              if (errorObj && errorObj.code === 1) {
+                // Abort error is normal on state change
+                return;
+              }
+              
+              setAudioPlayState(false);
+              setSynthesisState("failure");
+              setErrorMessage("Audio playback error: Failed to load audio source or unsupported format");
+              onAddNotification(
+                "Playback Error", 
+                "Audio format is not supported or failed to load. Please try synthesizing again.", 
+                "warning"
+              );
+            }}
           />
 
-          <div className="flex items-center justify-between text-[8.5px] text-slate-400 px-0.5">
-            <span>Buffer Parts: <b className="text-slate-300 font-mono">{chunkEstimate} Clause{chunkEstimate > 1 ? "s" : ""}</b></span>
-            <span>No HTTP Timeouts</span>
+          <div className="flex items-center gap-3 bg-[#0D1321] rounded-xl p-3 border border-slate-800">
+            <button
+              onClick={togglePlayback}
+              className="w-10 h-10 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 flex items-center justify-center shrink-0 transition-all duration-200 active:scale-90"
+            >
+              {audioPlayState ? <Pause className="w-4 h-4 fill-current text-slate-950" /> : <Play className="w-4 h-4 fill-current text-slate-950 ml-0.5" />}
+            </button>
+
+            <div className="flex-1 flex flex-col justify-center overflow-hidden">
+              <p className="text-[10px] text-slate-200 font-semibold truncate">ZoeRecap_Voice_Output.mp3</p>
+              {/* Responsive live waveforms */}
+              <div className="flex items-end gap-[1.5px] h-3 mt-1.5 select-none overflow-hidden">
+                {Array.from({ length: 42 }).map((_, idx) => {
+                  const height = audioPlayState 
+                    ? Math.abs(Math.sin(idx * 0.2 + Date.now() * 0.05)) * 8 + 4
+                    : 3;
+                  return (
+                    <div 
+                      key={idx} 
+                      className={`w-[1.5px] rounded-full transition-all duration-150 ${
+                        audioPlayState ? 'bg-emerald-400' : 'bg-slate-700'
+                      }`} 
+                      style={{ height: `${height}px` }} 
+                    />
+                  );
+                })}
+              </div>
+            </div>
           </div>
 
           <button
-            onClick={handleSynthesizeTts}
-            disabled={isSynthesizing || !text.trim()}
-            className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-semibold text-xs py-2.5 rounded-lg transition-all duration-200 mt-1.5 flex items-center justify-center gap-1.5 active:scale-[0.98] shadow-md shadow-blue-950/20"
+            onClick={handleDownloadMp3}
+            disabled={isDownloading}
+            className="w-full bg-[#1A2333] hover:bg-slate-800 disabled:bg-slate-800 disabled:opacity-70 border border-[#1E293B] text-slate-200 text-xs py-2.5 rounded-xl transition-all duration-200 flex items-center justify-center gap-1.5 font-semibold"
           >
-            <RefreshCw className={`w-3 h-3 ${isSynthesizing ? "animate-spin" : ""}`} />
-            {isSynthesizing ? "Synthesizing vocal wave..." : "Synthesize MP3 Voice"}
+            {isDownloading ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-t-transparent border-slate-300 rounded-full animate-spin" />
+                <span>Downloading... (ဒေါင်းလုဒ်ဆွဲနေသည်...)</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Download MP3 Track</span>
+              </>
+            )}
           </button>
         </div>
-
-        {/* Loading progression logs */}
-        {isSynthesizing && (
-          <div className="bg-[#1D283C]/60 border border-blue-500/20 rounded-xl p-3 text-center flex flex-col items-center justify-center space-y-1.5">
-            <Disc className="w-4 h-4 text-blue-400 animate-spin" />
-            <p className="text-[9px] font-mono text-blue-300">{progressLog}</p>
-          </div>
-        )}
-
-        {/* Combined Playback Engine Card */}
-        {syncedAudioUrl && (
-          <div className="bg-[#1A2333]/95 border border-emerald-500/20 rounded-xl p-3 space-y-2.5 shadow-lg">
-            <div className="flex items-center justify-between">
-              <span className="text-[8px] font-bold text-emerald-400 flex items-center gap-0.5">
-                <CheckCircle className="w-2.5 h-2.5" />
-                INTEGRATED MIXER READY
-              </span>
-              <span className="text-[7.5px] font-mono text-slate-500">MPEG Layer-3</span>
-            </div>
-
-            <audio 
-              ref={audioRef} 
-              src={syncedAudioUrl} 
-              className="hidden" 
-              onEnded={() => setAudioPlayState(false)} 
-              onError={async (e) => {
-                const errorObj = e.currentTarget.error;
-                console.warn("[TtsStudio] Audio element error event triggered:", errorObj?.code, errorObj?.message);
-                
-                // Code 1 is MEDIA_ERR_ABORTED. This triggers when we change src or reload elements.
-                if (errorObj && errorObj.code === 1) {
-                  console.log("[TtsStudio] Audio load aborted (normal on source change or fallback shift). Ignoring.");
-                  return;
-                }
-
-                if (syncedAudioUrl && syncedAudioUrl.startsWith("blob:") && compiledBlobRef.current) {
-                  console.warn("[TtsStudio] Object URL playback blocked or failed. Activating Base64 fallback decoding pipeline...");
-                  const reader = new FileReader();
-                  reader.onloadend = () => {
-                    let base64DataUrl = reader.result as string;
-                    if (base64DataUrl.startsWith("data:audio/mpeg;")) {
-                      base64DataUrl = base64DataUrl.replace("data:audio/mpeg;", "data:audio/mp3;");
-                    }
-                    setSyncedAudioUrl(base64DataUrl);
-                  };
-                  reader.readAsDataURL(compiledBlobRef.current);
-                  return;
-                }
-
-                console.warn("[TtsStudio] Audio playback error: Failed to load audio source or unsupported format");
-                setAudioPlayState(false);
-                onAddNotification(
-                  "Playback Error", 
-                  "Audio format is not supported or failed to load. Please try synthesizing again.", 
-                  "warning"
-                );
-              }}
-            />
-
-            <div className="flex items-center gap-2.5 bg-[#0D1321] rounded-xl p-2.5 border border-slate-800">
-              <button
-                onClick={togglePlayback}
-                className="w-8 h-8 rounded-full bg-emerald-500 hover:bg-emerald-400 text-slate-900 flex items-center justify-center shrink-0 transition-all duration-200"
-              >
-                {audioPlayState ? <Pause className="w-3.5 h-3.5 fill-current text-slate-950" /> : <Play className="w-3.5 h-3.5 fill-current text-slate-950 ml-0.5" />}
-              </button>
-
-              <div className="flex-1 flex flex-col justify-center">
-                <p className="text-[9px] text-slate-200 font-semibold truncate">Burmese_Voice_Compiled.mp3</p>
-                {/* Simulated waveforms visualizer */}
-                <div className="flex items-end gap-[1.5px] h-2.5 mt-1 select-none">
-                  {Array.from({ length: 32 }).map((_, idx) => {
-                    const height = audioPlayState 
-                      ? Math.sin(idx + Date.now() * 0.05) * 3 + 5 
-                      : 3;
-                    return (
-                      <div 
-                        key={idx} 
-                        className={`w-[1.5px] rounded-full transition-all duration-150 ${
-                          audioPlayState ? 'bg-emerald-400' : 'bg-slate-700'
-                        }`} 
-                        style={{ height: `${height}px` }} 
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={handleDownloadMp3}
-              disabled={isDownloading}
-              className="w-full bg-[#1A2333] hover:bg-slate-800 disabled:bg-slate-800 disabled:opacity-70 border border-[#1E293B] text-slate-200 text-xs py-2 rounded-lg transition-all duration-200 flex items-center justify-center gap-1.5"
-            >
-              {isDownloading ? (
-                <>
-                  <div className="w-3 h-3 border-2 border-t-transparent border-slate-300 rounded-full animate-spin" />
-                  <span>Downloading... (ဒေါင်းလုဒ်ဆွဲနေသည်...)</span>
-                </>
-              ) : (
-                <>
-                  <Download className="w-3 h-3" />
-                  <span>Download MP3 Track</span>
-                </>
-              )}
-            </button>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

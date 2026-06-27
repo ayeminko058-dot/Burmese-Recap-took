@@ -52,10 +52,16 @@ jobs:
 
       - name: Bubblewrap Build (APK and AAB Generation)
         run: |
-          # Use non-interactive bubblewrap command execution
+          # Doctor diagnostic check to ensure runtime SDK dependencies are met
           yes | bubblewrap doctor || true
           
-          # Build using the created keystore and configured twa-manifest.json
+          # Initialize or validate manifest structure
+          if [ ! -f "twa-manifest.json" ]; then
+            echo "Initializing twa-manifest.json from manifest.json..."
+            yes | bubblewrap init --manifest="manifest.json" || true
+          fi
+          
+          # Perform non-interactive deployment build
           yes | bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey" --signingKeyPassword="androidpassword" --storePassword="androidpassword"
 
       - name: Upload Signing Fingerprints & APK
