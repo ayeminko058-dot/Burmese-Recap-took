@@ -443,78 +443,17 @@ app.post("/api/tts", async (req, res) => {
 
       for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
-          const isMyanmar = selectedVoice.startsWith("my-") || selectedVoice.includes("my-MM");
-          let response = null;
-
-          const voice = selectedVoice;
-          const rate = finalRate;
-          const pitch = finalPitch;
-
           // Standard timeout helper (15 seconds) to prevent infinite server-side hangs
           const controller = new AbortController();
           const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-          const fetchHeaders: Record<string, string> = {
-            "Content-Type": "application/ssml+xml",
-            "Accept": "*/*"
-          };
+          const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
+          const getHeaders: Record<string, string> = {};
           if (userApiKey) {
-            fetchHeaders["X-Gemini-API-Key"] = userApiKey;
-            fetchHeaders["Authorization"] = `Bearer ${userApiKey}`;
+            getHeaders["X-Gemini-API-Key"] = userApiKey;
+            getHeaders["Authorization"] = `Bearer ${userApiKey}`;
           }
-
-          if (isMyanmar) {
-            const ssmlText = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='http://www.w3.org/2001/mstts' xml:lang='my-MM'><voice name='${voice}'><prosody rate='${rate}' pitch='${pitch}'>${sanitizedText}</prosody></voice></speak>`;
-
-            try {
-              response = await fetch(`https://my-edge-tts-api.vercel.app/api/tts?voice=${selectedVoice}`, {
-                method: "POST",
-                headers: fetchHeaders,
-                body: ssmlText,
-                signal: controller.signal
-              });
-
-              if (!response || !response.ok) {
-                const jsonHeaders: Record<string, string> = {
-                  "Content-Type": "application/json",
-                  "Accept": "*/*"
-                };
-                if (userApiKey) {
-                  jsonHeaders["X-Gemini-API-Key"] = userApiKey;
-                  jsonHeaders["Authorization"] = `Bearer ${userApiKey}`;
-                }
-                response = await fetch("https://my-edge-tts-api.vercel.app/api/tts", {
-                  method: "POST",
-                  headers: jsonHeaders,
-                  body: JSON.stringify({
-                    ssml: ssmlText,
-                    voice: selectedVoice
-                  }),
-                  signal: controller.signal
-                });
-              }
-            } catch (postError) {
-              console.warn(`[TTS Batch-Chunk ${index + 1}] POST SSML error on attempt ${attempt}:`, postError);
-            }
-
-            if (!response || !response.ok) {
-              const fallbackUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
-              const getHeaders: Record<string, string> = {};
-              if (userApiKey) {
-                getHeaders["X-Gemini-API-Key"] = userApiKey;
-                getHeaders["Authorization"] = `Bearer ${userApiKey}`;
-              }
-              response = await fetch(fallbackUrl, { headers: getHeaders, signal: controller.signal });
-            }
-          } else {
-            const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(rate)}&pitch=${encodeURIComponent(pitch)}`;
-            const getHeaders: Record<string, string> = {};
-            if (userApiKey) {
-              getHeaders["X-Gemini-API-Key"] = userApiKey;
-              getHeaders["Authorization"] = `Bearer ${userApiKey}`;
-            }
-            response = await fetch(ttsUrl, { headers: getHeaders, signal: controller.signal });
-          }
+          const response = await fetch(ttsUrl, { headers: getHeaders, signal: controller.signal });
 
           clearTimeout(timeoutId);
 
@@ -522,10 +461,19 @@ app.post("/api/tts", async (req, res) => {
             throw new Error(`Edge TTS API responded with status ${response ? response.status : "No Response"}`);
           }
 
+          const contentType = response.headers.get("content-type") || "";
+          if (!contentType.includes("audio") && !contentType.includes("octet-stream")) {
+            throw new Error(`Invalid response content-type: ${contentType}. Expected audio format.`);
+          }
+
           const arrayBuffer = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuffer);
           if (buffer.length === 0) {
             throw new Error("Received an empty audio buffer.");
+          }
+          const sample = buffer.slice(0, 150).toString("utf8").trim();
+          if (sample.startsWith("<!") || sample.startsWith("<html") || sample.startsWith("<HTML") || sample.startsWith("{") || sample.startsWith("[")) {
+            throw new Error("Received text/HTML error page content instead of valid audio binary stream.");
           }
           return buffer;
         } catch (err: any) {
@@ -537,7 +485,8 @@ app.post("/api/tts", async (req, res) => {
           }
         }
       }
-      throw lastChunkError || new Error("Unknown synthesis error");
+
+      throw lastChunkError || new Error(`Microsoft Edge-TTS completely failed for chunk ${index}.`);
     };
 
     console.log(`[TTS Parallel] Dispatching all ${cleanedChunks.length} chunks concurrently...`);
@@ -560,6 +509,13 @@ app.post("/api/tts", async (req, res) => {
     }
 
     const mergedBuffer = Buffer.concat(validBuffers);
+    
+    // Safety check: ensure we didn't end up with an HTML/JSON string masquerading as audio
+    const sampleText = mergedBuffer.slice(0, 150).toString("utf8").trim();
+    if (sampleText.startsWith("<!") || sampleText.startsWith("<html") || sampleText.startsWith("<HTML") || sampleText.startsWith("{") || sampleText.startsWith("[")) {
+      throw new Error("Integrated compilation produced a text response rather than a valid audio binary stream.");
+    }
+
     console.log(`[TTS Merge Engine] Unified ${validBuffers.length}/${cleanedChunks.length} chunks into a single audio payload (${mergedBuffer.length} bytes).`);
 
     res.writeHead(200, {

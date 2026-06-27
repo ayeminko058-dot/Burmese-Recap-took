@@ -105,40 +105,25 @@ export default function VideoDownloader({
     setValidationError(null);
 
     try {
-      const response = await safeFetch(getApiUrl("/api/validate-key"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Gemini-API-Key": keyToValidate,
-        },
+      const { GoogleGenAI } = await import("@google/genai");
+      const ai = new GoogleGenAI({ apiKey: keyToValidate });
+      
+      const response = await ai.models.generateContent({
+        model: "gemini-flash-latest",
+        contents: "Hello, answer with only 'OK'.",
       });
 
-      const contentType = response.headers.get("content-type");
-      let data: any = {};
-      
-      if (contentType && contentType.includes("application/json")) {
-        data = await response.json().catch(() => ({}));
-      } else {
-        const rawText = await response.text().catch(() => "");
-        if (rawText.includes("Unexpected token") || rawText.includes("504") || rawText.includes("timeout") || rawText.startsWith("T") || rawText.includes("Gateway")) {
-          throw new Error("တောင်းဆိုမှု ကြာမြင့်နေပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
-        }
-        throw new Error(rawText.substring(0, 100) || "Server network error.");
-      }
-
-      if (response.ok && data.valid) {
+      if (response && response.text) {
         setKeyValidationStatus("valid");
         onAddNotification("Validation Success", "Gemini API Key is valid and working!", "success");
       } else {
-        setKeyValidationStatus("invalid");
-        setValidationError(data.error || "The key appears to be invalid or unsupported.");
-        onAddNotification("Validation Failed", "Google rejected the requested key credentials.", "warning");
+        throw new Error("Empty response returned from Gemini key validation probe.");
       }
     } catch (err: any) {
-      console.error(err);
+      console.error("Gemini key validation failed:", err);
       setKeyValidationStatus("invalid");
-      setValidationError(err.message || "Failed to establish validation handshake with the server.");
-      onAddNotification("Network Error", "Handshake validation failed.", "warning");
+      setValidationError(err.message || "Failed to establish validation handshake with Google servers.");
+      onAddNotification("Validation Failed", err.message || "Google rejected the requested key credentials.", "warning");
     }
   };
 

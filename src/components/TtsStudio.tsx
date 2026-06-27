@@ -3,6 +3,7 @@ import {
   Volume2, Play, Pause, Download, Settings, Disc, Sparkles, RefreshCw, Layers, CheckCircle 
 } from "lucide-react";
 import { Filesystem, Directory } from "@capacitor/filesystem";
+import { Capacitor } from "@capacitor/core";
 import { triggerInterstitialAd } from "../utils/admob";
 import { getApiUrl, safeFetch } from "../utils/api";
 import { VoiceOption } from "../types";
@@ -31,7 +32,16 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   const [selectedStyle, setSelectedStyle] = useState("general");
   const [isSynthesizing, setIsSynthesizing] = useState(false);
   const [syncedAudioUrl, setSyncedAudioUrl] = useState<string | null>(null);
+  const [activeObjectUrl, setActiveObjectUrl] = useState<string | null>(null);
   const [audioPlayState, setAudioPlayState] = useState(false);
+
+  useEffect(() => {
+    return () => {
+      if (activeObjectUrl) {
+        URL.revokeObjectURL(activeObjectUrl);
+      }
+    };
+  }, [activeObjectUrl]);
   const [progressLog, setProgressLog] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -132,17 +142,15 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         throw new Error("The provided text contains no speakable characters.");
       }
 
-      setProgressLog(`Synthesizing ${cleanedChunks.length} speech chunks in parallel...`);
+      setProgressLog(`Synthesizing ${cleanedChunks.length} speech chunks directly from Edge-TTS...`);
 
-      const savedKey = localStorage.getItem("gemini_api_key") || "";
       const fetchHeaders: Record<string, string> = {
-        "Accept": "*/*"
+        "Accept": "audio/mpeg, */*"
       };
-      if (savedKey) {
-        fetchHeaders["X-Gemini-API-Key"] = savedKey;
-        fetchHeaders["Authorization"] = `Bearer ${savedKey}`;
-      }
 
+      let chunkBuffers: ArrayBuffer[] = [];
+
+      setProgressLog(`Parallel synthesis via Microsoft Edge-TTS (0% middleman overhead)...`);
       const chunkPromises = cleanedChunks.map(async (chunkText, index) => {
         const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
         const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(computedRate)}&pitch=${encodeURIComponent(computedPitch)}`;
@@ -150,22 +158,75 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         let lastErr: any = null;
         for (let attempt = 1; attempt <= 3; attempt++) {
           try {
-            const response = await fetch(ttsUrl, { headers: fetchHeaders });
-            if (!response.ok) throw new Error(`HTTP status ${response.status}`);
-            const arrayBuffer = await response.arrayBuffer();
-            if (arrayBuffer.byteLength === 0) throw new Error("Received an empty audio buffer.");
+            let response: Response;
+            
+            if (attempt === 1) {
+              // Direct fetch from Edge-TTS to satisfy physical device direct delivery
+              response = await fetch(ttsUrl, { headers: fetchHeaders });
+            } else {
+              // Graceful fallback to our Express backend proxy for web preview to completely bypass CORS / "Failed to fetch" blockages
+              const proxyUrl = getApiUrl("/api/tts");
+              response = await safeFetch(proxyUrl, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  ...fetchHeaders
+                },
+                body: JSON.stringify({
+                  text: chunkText,
+                  voice: selectedVoice,
+                  rate: computedRate,
+                  pitch: computedPitch,
+                })
+              });
+            }
+
+            if (!response.ok) {
+              throw new Error(`HTTP status ${response.status}`);
+            }
+
+            let arrayBuffer: ArrayBuffer;
+            if (attempt === 1) {
+              const contentType = response.headers.get("content-type") || "";
+              if (contentType.includes("text/html") || contentType.includes("application/xhtml+xml") || contentType.includes("text/plain") || contentType.includes("application/json")) {
+                throw new Error("Edge-TTS API returned text/HTML content instead of a valid audio stream.");
+              }
+              arrayBuffer = await response.arrayBuffer();
+            } else {
+              const blob = await response.blob();
+              arrayBuffer = await blob.arrayBuffer();
+            }
+
+            if (arrayBuffer.byteLength === 0) {
+              throw new Error("Received an empty audio buffer.");
+            }
+            
+            // Check first 150 bytes of the generated chunk to verify it's not a text/HTML error response masquerading as audio
+            const chunkSample = new Uint8Array(arrayBuffer.slice(0, 150));
+            const chunkSampleText = new TextDecoder().decode(chunkSample).trim();
+            if (
+              chunkSampleText.startsWith("<!") || 
+              chunkSampleText.startsWith("<html") || 
+              chunkSampleText.startsWith("<HTML") || 
+              chunkSampleText.startsWith("{") || 
+              chunkSampleText.startsWith("[")
+            ) {
+              throw new Error("Received text/HTML error page content in chunk stream.");
+            }
+
             return arrayBuffer;
           } catch (err: any) {
             lastErr = err;
+            console.warn(`[TTS Chunk ${index} Attempt ${attempt}] Failed: ${err.message || err}`);
             if (attempt < 3) {
-              await new Promise(resolve => setTimeout(resolve, 800 * attempt));
+              await new Promise(resolve => setTimeout(resolve, 600 * attempt));
             }
           }
         }
         throw lastErr || new Error("Unknown synthesis error");
       });
+      chunkBuffers = await Promise.all(chunkPromises);
 
-      const chunkBuffers = await Promise.all(chunkPromises);
       setProgressLog("Merging Final MP3 Voice...");
       await new Promise((resolve) => setTimeout(resolve, 600));
 
@@ -174,27 +235,65 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         throw new Error("Received an empty audio binary stream from synthesis server.");
       }
 
-      // Convert audio binary stream (Blob) into a Base64 Data URI to bypass local blob protocols block in native WebView
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        const base64DataUrl = reader.result as string;
-        setSyncedAudioUrl(base64DataUrl);
+      // Check first 150 bytes of the generated blob to verify it's not a text/HTML error response masquerading as audio
+      const sampleText = await audioBlob.slice(0, 150).text().catch(() => "");
+      const trimmedSample = sampleText.trim();
+      if (
+        trimmedSample.startsWith("<!") || 
+        trimmedSample.startsWith("<html") || 
+        trimmedSample.startsWith("<HTML") || 
+        trimmedSample.startsWith("{") || 
+        trimmedSample.startsWith("[")
+      ) {
+        throw new Error("Synthesis failed: The server returned a text/HTML error instead of valid audio binary stream.");
+      }
+
+      // Revoke any existing object URL to free up browser memory
+      if (activeObjectUrl) {
+        URL.revokeObjectURL(activeObjectUrl);
+        setActiveObjectUrl(null);
+      }
+
+      const isNative = Capacitor.isNativePlatform();
+
+      if (isNative) {
+        // Convert audio binary stream (Blob) into a clean Base64 Data URI stream immediately in the client via FileReader to guarantee cross-platform support in native WebView
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const base64DataUrl = reader.result as string;
+          setSyncedAudioUrl(base64DataUrl);
+          setProgressLog("");
+          setIsSynthesizing(false);
+          onAddNotification(
+            "Vocal Track Generated",
+            "Synthesized long-form speech successfully using Microsoft Edge-TTS. Click Play!",
+            "success"
+          );
+
+          // Register inside files list
+          const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
+          onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", base64DataUrl);
+        };
+        reader.onerror = () => {
+          throw new Error("Failed to compile audio stream into Base64 format.");
+        };
+        reader.readAsDataURL(audioBlob);
+      } else {
+        // Use highly optimized, native Object URL in the web preview to prevent Base64 string decoder limits and unsupported source errors
+        const audioUrl = URL.createObjectURL(audioBlob);
+        setActiveObjectUrl(audioUrl);
+        setSyncedAudioUrl(audioUrl);
         setProgressLog("");
         setIsSynthesizing(false);
         onAddNotification(
           "Vocal Track Generated",
-          `Synthesized long-form speech successfully. Click Play!`,
+          "Synthesized long-form speech successfully using Microsoft Edge-TTS. Click Play!",
           "success"
         );
 
-        // Register inside files list
         const fileName = `TTS_Voice_${Date.now().toString().slice(-4)}.mp3`;
-        onAddDownloadedFile(fileName, "BINARY_MP3_STREAM", "audio", base64DataUrl);
-      };
-      reader.onerror = () => {
-        throw new Error("Failed to compile audio stream into Base64 format.");
-      };
-      reader.readAsDataURL(audioBlob);
+        onAddDownloadedFile(fileName, audioUrl, "audio", audioUrl);
+      }
     } catch (err: any) {
       console.error(err);
       setProgressLog("");
@@ -225,23 +324,10 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         try {
           let base64Data = "";
           if (syncedAudioUrl.startsWith("data:")) {
-            base64Data = syncedAudioUrl.split(",")[1];
+            const commaIndex = syncedAudioUrl.indexOf(",");
+            base64Data = syncedAudioUrl.substring(commaIndex + 1);
           } else {
-            // Fetch raw audio blob
-            const res = await fetch(syncedAudioUrl);
-            const blob = await res.blob();
-            
-            // Convert to base64
-            const reader = new FileReader();
-            const base64Promise = new Promise<string>((resolve, reject) => {
-              reader.onloadend = () => {
-                const resStr = reader.result as string;
-                resolve(resStr.split(",")[1]);
-              };
-              reader.onerror = reject;
-              reader.readAsDataURL(blob);
-            });
-            base64Data = await base64Promise;
+            base64Data = syncedAudioUrl;
           }
 
           // Write natively to external storage Download folder
@@ -252,7 +338,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
             recursive: true,
           });
 
-           setIsDownloading(false);
+          setIsDownloading(false);
           await triggerAlert("🎉 MP3 အော်ဒီယိုဖိုင်ကို ဖုန်း၏ Download ဖိုဒါထဲသို့ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", "အောင်မြင်ပါသည်");
           onAddNotification("Download Success", "MP3 saved to native Download folder.", "success");
         } catch (err) {
@@ -449,6 +535,15 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
               src={syncedAudioUrl} 
               className="hidden" 
               onEnded={() => setAudioPlayState(false)} 
+              onError={() => {
+                console.error("Audio playback error: Failed to load audio source or unsupported format");
+                setAudioPlayState(false);
+                onAddNotification(
+                  "Playback Error", 
+                  "Audio format is not supported or failed to load. Please try synthesizing again.", 
+                  "warning"
+                );
+              }}
             />
 
             <div className="flex items-center gap-2.5 bg-[#0D1321] rounded-xl p-2.5 border border-slate-800">
