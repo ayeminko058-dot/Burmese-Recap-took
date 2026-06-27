@@ -91,6 +91,25 @@ function getRequestApiKey(req: express.Request): string | null {
   return key || null;
 }
 
+// Helper to get Edge-TTS host safely to prevent infinite loop recursion when VITE_APP_URL points to self
+function getEdgeTtsHost(): string {
+  const envUrl = process.env.VITE_APP_URL;
+  if (envUrl && envUrl.trim()) {
+    const trimmed = envUrl.trim();
+    // Prevent routing back to itself if VITE_APP_URL is our own dev/prod/localhost app container
+    if (
+      !trimmed.includes("run.app") &&
+      !trimmed.includes("localhost") &&
+      !trimmed.includes("127.0.0.1") &&
+      !trimmed.includes("0.0.0.0") &&
+      trimmed.startsWith("http")
+    ) {
+      return trimmed;
+    }
+  }
+  return "https://my-edge-tts-api.vercel.app";
+}
+
 // Global System Instruction for Burmese Movie Recap storytelling style
 const BURMESE_STORYTELLER_INSTRUCTION = 
   "You are a professional, high-fidelity Myanmar translation and writing assistant specialized in movie-recap narration scripts. " +
@@ -282,7 +301,7 @@ app.post("/api/tts", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const edgeTtsHost = process.env.VITE_APP_URL || "https://my-edge-tts-api.vercel.app";
+      const edgeTtsHost = getEdgeTtsHost();
       const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
       const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
@@ -369,7 +388,7 @@ app.post("/api/generate-voice", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const edgeTtsHost = process.env.VITE_APP_URL || "https://my-edge-tts-api.vercel.app";
+      const edgeTtsHost = getEdgeTtsHost();
       const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
       const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
