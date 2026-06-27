@@ -65,25 +65,34 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
         setTranslatedText("");
 
         try {
-          const { GoogleGenAI } = await import("@google/genai");
-          const ai = new GoogleGenAI({ apiKey: savedKey });
-          
-          const sourceDesc = sourceLang === "Auto Detect" ? "detect the source language" : `the source language is ${sourceLang}`;
-          const prompt = `You are a professional, high-fidelity universal translation engine. 
-Translate the following text into the target language "${targetLang}". 
-Note that ${sourceDesc}. 
-
-Deliver ONLY the direct translated text. Do not add any conversational replies, explanations, markdown formatting blocks (like \`\`\` or \`\`\`html), preamble, notes, or meta comments.
-
-Text to translate:
-${inputText}`;
-
-          const response = await ai.models.generateContent({
-            model: "gemini-flash-latest",
-            contents: prompt,
+          // Robust proxy request routing to Express backend translation pipeline
+          const apiUrl = getApiUrl("/api/translate");
+          const response = await safeFetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Gemini-API-Key": savedKey,
+            },
+            body: JSON.stringify({
+              text: inputText,
+              sourceLang: sourceLang,
+              targetLang: targetLang,
+            }),
           });
 
-          const finalTranslatedText = response.text?.trim() || "";
+          // Check response headers content-type explicitly
+          const contentType = response.headers.get("content-type");
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error?.message || errorData.error || `Server Network Error: Response status code (${response.status})`);
+          }
+
+          if (contentType && contentType.includes("text/html")) {
+            throw new Error("Server Network Error: The server returned an HTML page instead of JSON data.");
+          }
+
+          const resData = await response.json();
+          const finalTranslatedText = (resData.translatedText || resData.translation || "").trim();
           
           if (!finalTranslatedText) {
             throw new Error("ဘာသာပြန်ဆိုချက် ရယူရန် ပျက်ကွက်ခဲ့ပါသည်။ ခဏအကြာမှ ပြန်လည်ကြိုးစားပေးပါ။");
@@ -92,7 +101,7 @@ ${inputText}`;
           // Explicitly update the state variable linked to the 'TRANSLATED OUTPUT' text box
           setTranslatedText(finalTranslatedText);
           setStatus("completed");
-          onAddNotification("Translation Success", "Translated successfully with Gemini.", "success");
+          onAddNotification("Translation Success", "Translated successfully with Burmese Recap Storytelling Engine.", "success");
         } catch (err: any) {
           console.error("Gemini Direct Translation failed:", err);
           setStatus("error");

@@ -353,10 +353,10 @@ export default function VideoDownloader({
         setBackendStatusMsg("Stage 1 (Fallback): Sending original file directly...");
       }
 
-      // Step 2: Direct client-side transcribing with Gemini
+      // Step 2: Route transcription request through backend proxy
       setProgress(45);
-      setBackendStatusMsg("Stage 2: Transcribing speech via Direct Gemini API on-device...");
-      onAddNotification("Direct Handshake", "Initiating client-side direct audio transcription with Gemini...", "info");
+      setBackendStatusMsg("Stage 2: Transcribing speech via Server Gemini API proxy...");
+      onAddNotification("Direct Handshake", "Initiating backend speech-to-text pipeline...", "info");
 
       // Convert audioBlob into base64 format for inline passing
       const base64Data = await new Promise<string>((resolve, reject) => {
@@ -369,53 +369,39 @@ export default function VideoDownloader({
         reader.readAsDataURL(audioBlob);
       });
 
-      const { GoogleGenAI } = await import("@google/genai");
-      const ai = new GoogleGenAI({ apiKey: savedKey });
-
-      let prompt = "";
-      if (formatSelection === "srt") {
-        prompt = `You will receive an audio file. Perform an exact and highly accurate speech transcription of what is spoken.
-Translate the transcribed spoken speech into clear English subtitles.
-Deliver the results strictly in the SubRip Subtitle (SRT) format. 
-Format requirements:
-- Use exact sequential block numbers starting from 1.
-- Include accurate timestamps in the standard format (e.g., 00:00:01,200 --> 00:00:04,500).
-- Produce ONLY raw SRT text content.
-- Absolute ban on markdown formatting code blocks (do not wrap in \`\`\` or \`\`\`srt).
-- Do not add any notes, preamble, explanations, or introductory/explanatory text.
-- If speech in some segment is unclear, write [inaudible].
-- Keep subtitle duration within reasonable intervals.`;
-      } else {
-        prompt = `You will receive an audio file. Perform an exact, high-fidelity transcription of all spoken words in the audio.
-Output the full transcription in clear English text.
-Strict instructions:
-- Output ONLY the transcribed text. Do not summarize, outline, rewrite, or explain under any circumstances.
-- Do not add markdown blocks, notes, comments, meta tags, or conversational intros/outros.
-- If some speech is unclear or there is silence, print "[inaudible]" or omit as appropriate. Do not attempt to guess or invent context.`;
-      }
-
       setProgress(60);
-      setBackendStatusMsg("Stage 2: Gemini is analyzing speech acoustics...");
+      setBackendStatusMsg("Stage 2: Server is analyzing speech acoustics via Gemini...");
 
-      const geminiResponse = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: [
-          {
-            inlineData: {
-              mimeType: "audio/wav",
-              data: base64Data,
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
+      const apiUrl = getApiUrl("/api/transcribe");
+      const response = await safeFetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Gemini-API-Key": savedKey,
+        },
+        body: JSON.stringify({
+          audioData: base64Data,
+          mimeType: "audio/wav",
+          format: formatSelection,
+        }),
       });
 
+      // Check response headers content-type explicitly
+      const contentType = response.headers.get("content-type");
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || errorData.error || `Server Network Error: Response status code (${response.status})`);
+      }
+
+      if (contentType && contentType.includes("text/html")) {
+        throw new Error("Server Network Error: The server returned an HTML page instead of JSON data.");
+      }
+
+      const resData = await response.json();
       setProgress(85);
       setBackendStatusMsg("Stage 3: Parsing received transcription timelines...");
 
-      let resultText = geminiResponse.text || "";
+      let resultText = resData.output || "";
       
       // Clean markdown wrap blocks if any returned
       if (resultText.includes("```")) {

@@ -21,6 +21,7 @@ async function generateContentWithRetry(
   delayMs = 1000
 ): Promise<any> {
   const fallbackSequence = [
+    "gemini-1.5-flash",
     "gemini-3.5-flash", 
     "gemini-2.5-flash", 
     "gemini-3.1-flash-lite", 
@@ -28,7 +29,7 @@ async function generateContentWithRetry(
   ];
   let attempt = 0;
   let lastError: any = null;
-  let currentModel = options.model;
+  let currentModel = options.model || "gemini-1.5-flash";
 
   while (attempt < retries) {
     try {
@@ -68,8 +69,8 @@ async function generateContentWithRetry(
           console.log(`[Gemini API Status] Dynamic fallback: switching model to ${nextModel} for retry.`);
           currentModel = nextModel;
         } else {
-          // If the model was not in our standard sequence or we reached the end, cycle back or use gemini-2.5-flash as default fallback
-          const fallbackModel = "gemini-2.5-flash";
+          // If the model was not in our standard sequence or we reached the end, cycle back or use gemini-3.5-flash as default fallback
+          const fallbackModel = "gemini-3.5-flash";
           console.log(`[Gemini API Status] Fallback boundary reached. Switching to safe default model ${fallbackModel}`);
           currentModel = fallbackModel;
         }
@@ -125,7 +126,7 @@ app.post("/api/validate-key", async (req, res) => {
   try {
     const apiKey = getRequestApiKey(req);
     if (!apiKey) {
-      res.status(400).json({ error: "Gemini API Key is required but not configured. Please check your runtime key settings." });
+      res.status(400).json({ error: { message: "Gemini API Key is required but not configured. Please check your runtime key settings." } });
       return;
     }
 
@@ -140,7 +141,7 @@ app.post("/api/validate-key", async (req, res) => {
 
     // Run a simple test call
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: "Output only the word 'OK' to validate and test key.",
     });
 
@@ -148,11 +149,11 @@ app.post("/api/validate-key", async (req, res) => {
     if (output.includes("OK") || output.trim().length > 0) {
       res.json({ valid: true });
     } else {
-      res.status(502).json({ error: "Empty response from Gemini API during validation." });
+      res.status(502).json({ error: { message: "Empty response from Gemini API during validation." } });
     }
   } catch (error: any) {
     console.error("Gemini API key validation failed:", error);
-    res.status(500).json({ error: error.message || "Failed to validate Gemini API Key." });
+    res.status(500).json({ error: { message: error.message || "Failed to validate Gemini API Key." } });
   }
 });
 
@@ -221,13 +222,13 @@ app.post("/api/translate", async (req, res) => {
   try {
     const { text, sourceLang, targetLang } = req.body;
     if (!text || typeof text !== "string") {
-      res.status(400).json({ error: "Text parameter is required." });
+      res.status(400).json({ error: { message: "Text parameter is required." } });
       return;
     }
 
     const apiKey = getRequestApiKey(req);
     if (!apiKey) {
-      res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
+      res.status(400).json({ error: { message: "Gemini API Key is required but not configured. Please save your API Key in Settings first." } });
       return;
     }
 
@@ -241,7 +242,27 @@ app.post("/api/translate", async (req, res) => {
     });
 
     const sourceDesc = sourceLang === "Auto Detect" ? "detect the source language" : `the source language is ${sourceLang}`;
-    const prompt = `You are a professional, high-fidelity universal translation engine. 
+    
+    // Check if the target is Burmese/Myanmar to inject precise storytelling system instructions
+    const isBurmeseTarget = targetLang === "Myanmar" || targetLang === "Burmese" || targetLang === "Burmese (recaps)";
+    
+    let prompt = "";
+    if (isBurmeseTarget) {
+      prompt = `You are a professional, high-fidelity universal translation engine tailored specifically for movie-recap narration scripts.
+Translate the following text into the target language "${targetLang}". 
+Note that ${sourceDesc}. 
+
+Strict storytelling style instructions:
+1. Translate to Myanmar (Burmese) in a natural, engaging, and thrilling movie-recap storyteller style (ရုပ်ရှင်အညွှန်း ပြောပြသူ ပုံစံမျိုး).
+2. Ensure perfect spelling and grammar, conforming strictly to official Myanmar Orthography.
+3. Use precise, expressive, and dramatic vocabulary suitable for voiceover narration (e.g., using transition words like "ထို့နောက်", "ဒီလိုနဲ့", "နောက်ဆုံးမှာတော့").
+4. Keep the sentence structures cohesive, thrilling, clear, and easy to read out loud as a narration script.
+5. Deliver ONLY the direct translated text. Absolute ban on markdown formatting blocks, conversational replies, preamble, notes, or meta comments.
+
+Text to translate:
+${text}`;
+    } else {
+      prompt = `You are a professional, high-fidelity universal translation engine. 
 Translate the following text into the target language "${targetLang}". 
 Note that ${sourceDesc}. 
 
@@ -249,9 +270,10 @@ Deliver ONLY the direct translated text. Do not add any conversational replies, 
 
 Text to translate:
 ${text}`;
+    }
 
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: prompt,
     });
 
@@ -264,7 +286,7 @@ ${text}`;
     });
   } catch (error: any) {
     console.error("Gemini Translation failed:", error);
-    res.status(500).json({ error: error.message || "Translation failed." });
+    res.status(500).json({ error: { message: error.message || "Translation failed." } });
   }
 });
 
@@ -273,13 +295,13 @@ app.post("/api/transcribe", async (req, res) => {
   try {
     const { audioData, mimeType, format } = req.body;
     if (!audioData) {
-      res.status(400).json({ error: "Audio data (base64) is required." });
+      res.status(400).json({ error: { message: "Audio data (base64) is required." } });
       return;
     }
 
     const apiKey = getRequestApiKey(req);
     if (!apiKey) {
-      res.status(400).json({ error: "Gemini API Key is required but not configured. Please save your API Key in Settings first." });
+      res.status(400).json({ error: { message: "Gemini API Key is required but not configured. Please save your API Key in Settings first." } });
       return;
     }
 
@@ -319,7 +341,7 @@ Strict instructions:
 
     // Call Gemini API passing the audio data dynamically
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-3.5-flash",
+      model: "gemini-1.5-flash",
       contents: [
         {
           inlineData: {
@@ -336,7 +358,7 @@ Strict instructions:
     res.json({ output: response.text || "" });
   } catch (error: any) {
     console.error("Gemini Audio Transcription failed:", error);
-    res.status(500).json({ error: error.message || "Speech transcription failed." });
+    res.status(500).json({ error: { message: error.message || "Speech transcription failed." } });
   }
 });
 
@@ -1665,6 +1687,16 @@ async function startServer() {
       res.sendFile(path.join(distPath, "index.html"));
     });
   }
+
+  // Global Express error handling middleware to ensure 100% JSON output, preventing HTML leak errors in client
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("[Global Error Handler] Caught unexpected exception:", err);
+    res.status(err.status || err.statusCode || 500).json({
+      error: {
+        message: err.message || "An unexpected server-side error occurred in Burmese Recap Studio.",
+      }
+    });
+  });
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[Burmese Recap Tool] Server boot success. Live on http://localhost:${PORT}`);

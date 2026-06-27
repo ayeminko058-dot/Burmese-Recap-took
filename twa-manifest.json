@@ -1,0 +1,33 @@
+{
+  "packageId": "com.myanmarsol.burmese_recap_tool",
+  "host": "ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app",
+  "name": "Burmese Recap Studio",
+  "launcherName": "Recap Studio",
+  "themeColor": "#059669",
+  "navigationColor": "#020617",
+  "navigationColorDark": "#020617",
+  "navigationDividerColor": "#000000",
+  "navigationDividerColorDark": "#000000",
+  "backgroundColor": "#020617",
+  "enableNotifications": true,
+  "startUrl": "/",
+  "iconUrl": "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app/assets/icon.png",
+  "maskableIconUrl": "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app/assets/icon.png",
+  "splashFadeOutDuration": 300,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "androidkey"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "appVersion": "1.0.0",
+  "display": "standalone",
+  "orientation": "portrait",
+  "fingerprints": [],
+  "features": {},
+  "alphaDependencies": false,
+  "enableSiteSettingsShortcut": true,
+  "isChromeOSOnly": false,
+  "webManifestUrl": "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app/manifest.json",
+  "fallbackType": "customtabs"
+}

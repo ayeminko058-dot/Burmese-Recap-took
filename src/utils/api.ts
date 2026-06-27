@@ -1,5 +1,8 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
+// Dedicated configuration variable for the external Live Server URL (HTTPS)
+export const LIVE_SERVER_URL = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+
 /**
  * Returns a fully qualified absolute URL for API calls in native environments,
  * or the relative path when running on the web preview.
@@ -43,9 +46,8 @@ export function getApiUrl(endpoint: string): string {
     return `${base}${cleanEndpoint}`;
   }
 
-  // Hardcoded active Cloud Run service URL fallback so it works out of the box in production APK builds
-  const defaultFallback = "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
-  return `${defaultFallback}${cleanEndpoint}`;
+  // Fallback to our dedicated external Live Server URL
+  return `${LIVE_SERVER_URL}${cleanEndpoint}`;
 }
 
 /**
@@ -66,19 +68,13 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
       const rawRes = await fetch(url, options);
       const contentType = rawRes.headers.get("content-type");
       
-      // If the request succeeded but returned HTML instead of expected JSON/binary, intercept it.
+      // If the request succeeded but returned HTML instead of expected JSON/binary, intercept and throw Server Network Error
       if (rawRes.ok && (!contentType || !contentType.includes("application/json")) && !url.includes("/api/tts") && !url.includes(".mp3")) {
         const clone = rawRes.clone();
         const text = await clone.text().catch(() => "");
         const trimmed = text.trim();
         if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
-          return new Response(JSON.stringify({
-            error: "Route redirection or invalid server response: The server returned an HTML page instead of JSON. Please verify the backend server is active and trailing slashes are eliminated."
-          }), {
-            status: 502,
-            statusText: "Bad Gateway (HTML returned)",
-            headers: new Headers({ "Content-Type": "application/json" }),
-          });
+          throw new Error("Server Network Error: Invalid content-type received from server (Expected JSON, but received HTML page).");
         }
       }
       return rawRes;
@@ -162,17 +158,11 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
         ? JSON.stringify(nativeResponse.data) 
         : nativeResponse.data;
 
-      // Intercept HTML pages returned with 200 OK
+      // Intercept HTML pages and redirect them straight to the catch block as a 'Server Network Error'
       if (typeof responseBody === "string") {
         const trimmed = responseBody.trim();
         if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
-          return new Response(JSON.stringify({ 
-            error: "Route redirection or invalid server response: The server returned an HTML error page instead of JSON data. Please verify the backend server is active and the URL is configured correctly." 
-          }), {
-            status: 502,
-            statusText: "Bad Gateway (HTML returned)",
-            headers: new Headers({ "Content-Type": "application/json" }),
-          });
+          throw new Error("Server Network Error: Expected JSON response, but received HTML response page from server.");
         }
       }
     }
@@ -183,7 +173,7 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
       headers: responseHeaders,
     });
   } catch (error: any) {
-    console.error("[SafeFetch] Native request failed. Falling back to default browser engine...", error);
-    return fetch(url, options);
+    console.error("[SafeFetch] Native request failed. Bubbling up to catch block...", error);
+    throw error;
   }
 }
