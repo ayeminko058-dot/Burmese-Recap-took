@@ -310,8 +310,14 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
       audioRef.current.pause();
       setAudioPlayState(false);
     } else {
-      audioRef.current.play();
-      setAudioPlayState(true);
+      audioRef.current.play()
+        .then(() => {
+          setAudioPlayState(true);
+        })
+        .catch((err) => {
+          console.warn("[TtsStudio] Direct audio play rejected/failed:", err);
+          setAudioPlayState(false);
+        });
     }
   };
 
@@ -537,7 +543,16 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
               src={syncedAudioUrl} 
               className="hidden" 
               onEnded={() => setAudioPlayState(false)} 
-              onError={async () => {
+              onError={async (e) => {
+                const errorObj = e.currentTarget.error;
+                console.warn("[TtsStudio] Audio element error event triggered:", errorObj?.code, errorObj?.message);
+                
+                // Code 1 is MEDIA_ERR_ABORTED. This triggers when we change src or reload elements.
+                if (errorObj && errorObj.code === 1) {
+                  console.log("[TtsStudio] Audio load aborted (normal on source change or fallback shift). Ignoring.");
+                  return;
+                }
+
                 if (syncedAudioUrl && syncedAudioUrl.startsWith("blob:") && compiledBlobRef.current) {
                   console.warn("[TtsStudio] Object URL playback blocked or failed. Activating Base64 fallback decoding pipeline...");
                   const reader = new FileReader();
