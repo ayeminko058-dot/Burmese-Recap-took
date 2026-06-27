@@ -35,17 +35,40 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   const [activeObjectUrl, setActiveObjectUrl] = useState<string | null>(null);
   const [audioPlayState, setAudioPlayState] = useState(false);
 
-  useEffect(() => {
-    return () => {
-      if (activeObjectUrl) {
-        URL.revokeObjectURL(activeObjectUrl);
-      }
-    };
-  }, [activeObjectUrl]);
+  // Maintain a record of all created object URLs to revoke them strictly on unmount (preventing early GC interruption)
+  const createdObjectUrlsRef = useRef<string[]>([]);
+
   const [progressLog, setProgressLog] = useState("");
   const [isDownloading, setIsDownloading] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const compiledBlobRef = useRef<Blob | null>(null);
+
+  // Auto-play / Explicit load pipeline on audio source changes (designed for mobile browsers/WebViews)
+  useEffect(() => {
+    if (syncedAudioUrl && audioRef.current) {
+      console.log("[TtsStudio] Syncing audio URL change. Invoking load() and play()...");
+      try {
+        audioRef.current.load();
+        
+        // Ensure play is triggered inside a robust try-catch handler to gracefully survive gesture blockages
+        const playPromise = audioRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise
+            .then(() => {
+              console.log("[TtsStudio] Playback started successfully.");
+              setAudioPlayState(true);
+            })
+            .catch((err) => {
+              console.warn("[TtsStudio] Direct autoplay blocked or interrupted by gesture restriction:", err);
+              setAudioPlayState(false);
+            });
+        }
+      } catch (err) {
+        console.error("[TtsStudio] Failed to load/play audio on URL sync:", err);
+        setAudioPlayState(false);
+      }
+    }
+  }, [syncedAudioUrl]);
 
   const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
     if (typeof (window as any).customAlert === "function") {
@@ -250,16 +273,13 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         throw new Error("Synthesis failed: The server returned a text/HTML error instead of valid audio binary stream.");
       }
 
-      // Revoke any existing object URL to free up browser memory
-      if (activeObjectUrl) {
-        URL.revokeObjectURL(activeObjectUrl);
-        setActiveObjectUrl(null);
-      }
-
+      // Avoid aggressive immediate revocation of activeObjectUrl so current playback/buffering isn't broken
       const isNative = Capacitor.isNativePlatform();
+      const isMobile = typeof navigator !== "undefined" && /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 
-      if (isNative) {
-        // Convert audio binary stream (Blob) into a clean Base64 Data URI stream immediately in the client via FileReader to guarantee cross-platform support in native WebView
+      if (isNative || isMobile) {
+        setProgressLog("Encoding audio stream to reliable Base64 format...");
+        // Convert audio binary stream (Blob) into a clean Base64 Data URI stream immediately in the client via FileReader to guarantee cross-platform support in mobile browsers/WebViews
         const reader = new FileReader();
         reader.onloadend = () => {
           const base64DataUrl = reader.result as string;
@@ -268,7 +288,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
           setIsSynthesizing(false);
           onAddNotification(
             "Vocal Track Generated",
-            "Synthesized long-form speech successfully using Microsoft Edge-TTS. Click Play!",
+            "Synthesized speech successfully. Preparing audio...",
             "success"
           );
 
@@ -283,13 +303,14 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
       } else {
         // Use highly optimized, native Object URL in the web preview to prevent Base64 string decoder limits and unsupported source errors
         const audioUrl = URL.createObjectURL(audioBlob);
+        createdObjectUrlsRef.current.push(audioUrl); // Track for unmount cleanup
         setActiveObjectUrl(audioUrl);
         setSyncedAudioUrl(audioUrl);
         setProgressLog("");
         setIsSynthesizing(false);
         onAddNotification(
           "Vocal Track Generated",
-          "Synthesized long-form speech successfully using Microsoft Edge-TTS. Click Play!",
+          "Synthesized speech successfully. Preparing audio...",
           "success"
         );
 
@@ -402,6 +423,15 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
 
   useEffect(() => {
     return () => {
+      // Revoke all created Object URLs strictly when the component unmounts
+      createdObjectUrlsRef.current.forEach((url) => {
+        try {
+          URL.revokeObjectURL(url);
+        } catch (e) {
+          console.warn("[TtsStudio] Failed to revoke URL on unmount:", url, e);
+        }
+      });
+
       if (audioRef.current) {
         try {
           audioRef.current.pause();
