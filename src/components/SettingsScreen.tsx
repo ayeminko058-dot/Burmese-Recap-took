@@ -25,6 +25,9 @@ export default function SettingsScreen({
   const [validationStatus, setValidationStatus] = useState<"idle" | "validating" | "valid" | "unconfigured" | "invalid">("idle");
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Server synchronization URL state
+  const [serverUrl, setServerUrl] = useState<string>("");
+
   // Load API key and server URL from local storage on component mount
   useEffect(() => {
     const savedKey = localStorage.getItem("gemini_api_key") || "";
@@ -35,6 +38,9 @@ export default function SettingsScreen({
     } else {
       setValidationStatus("unconfigured");
     }
+
+    const savedServerUrl = localStorage.getItem("server_url") || "";
+    setServerUrl(savedServerUrl);
   }, []);
 
   const handleSaveKey = () => {
@@ -94,6 +100,36 @@ export default function SettingsScreen({
       setValidationStatus("invalid");
       setValidationError(err.message || "Could not complete network verification handshake.");
       onAddNotification("Handshake failure", "Validation connection interrupted.", "warning");
+    }
+  };
+
+  const handleSaveServerUrl = () => {
+    let cleanUrl = serverUrl.trim();
+    if (cleanUrl) {
+      while (cleanUrl.endsWith("/")) {
+        cleanUrl = cleanUrl.slice(0, -1);
+      }
+      localStorage.setItem("server_url", cleanUrl);
+      setServerUrl(cleanUrl);
+      onAddNotification("Server Connection Saved", `API calls will now route to ${cleanUrl}`, "success");
+    } else {
+      localStorage.removeItem("server_url");
+      onAddNotification("Server Connection Reset", "API calls will fall back to default dynamic origin/LIVE_SERVER_URL", "info");
+    }
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const handleAutoDetectServerUrl = () => {
+    if (typeof window !== "undefined" && window.location.origin) {
+      const origin = window.location.origin;
+      if (!origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.includes("capacitor://")) {
+        setServerUrl(origin);
+        localStorage.setItem("server_url", origin);
+        onAddNotification("Auto-Detected Connection", `Server URL set to active web origin: ${origin}`, "success");
+        window.dispatchEvent(new Event("storage"));
+      } else {
+        onAddNotification("Auto-Detect Unavailable", "Cannot auto-detect from local/sandboxed WebView URL origins.", "warning");
+      }
     }
   };
 
@@ -205,6 +241,67 @@ export default function SettingsScreen({
                 Error log: {validationError}
               </div>
             )}
+          </div>
+        </div>
+
+        {/* Express Server Sync Section */}
+        <div className="bg-[#1A2333]/90 border border-slate-800 rounded-2xl p-4 space-y-3.5">
+          <div className="flex items-center justify-between select-none">
+            <h3 className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+              <HardDrive className="w-4 h-4 text-emerald-400 animate-pulse" />
+              Express Backend Synchronization
+            </h3>
+            <span className="text-[9px] bg-slate-850 text-emerald-400 py-0.5 px-2.5 rounded-full font-mono font-bold uppercase tracking-wider border border-emerald-500/10">
+              API SERVER
+            </span>
+          </div>
+
+          <p className="text-[10px] text-slate-400 leading-relaxed font-sans text-left">
+            Configure the Backend Server URL to sync physical Android devices and secure web previews with your active cloud workstation environment.
+          </p>
+
+          <div className="space-y-3 font-medium select-none">
+            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 flex flex-col gap-1 text-left">
+              <label className="text-[8px] text-slate-500 font-mono tracking-wider uppercase font-bold">API Sync Address</label>
+              <input
+                type="text"
+                value={serverUrl}
+                onChange={(e) => setServerUrl(e.target.value)}
+                placeholder="https://ais-dev-...run.app (or leave empty for auto)"
+                className="bg-transparent text-xs text-white outline-none font-mono placeholder-slate-750 select-text w-full py-0.5"
+              />
+            </div>
+
+            <div className="flex justify-between items-center text-[9px] font-mono text-slate-500">
+              <span>Sync Mode:</span>
+              {serverUrl ? (
+                <span className="text-emerald-400 font-bold flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Manual Sync URL Active
+                </span>
+              ) : (
+                <span className="text-blue-400 font-bold flex items-center gap-1">
+                  <RefreshCw className="w-3.5 h-3.5 text-blue-400 animate-spin" /> Auto-Routing (Dynamic Workspace)
+                </span>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 text-xs select-none">
+              <button
+                type="button"
+                onClick={handleSaveServerUrl}
+                className="bg-emerald-600 hover:bg-emerald-500 border border-emerald-550/25 text-white text-[10px] font-bold py-2 rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer"
+              >
+                {serverUrl ? "Apply Sync URL" : "Set to Auto-Fallback"}
+              </button>
+              
+              <button
+                type="button"
+                onClick={handleAutoDetectServerUrl}
+                className="bg-[#0D1321] border border-slate-850 hover:border-slate-700 text-slate-300 text-[10px] font-bold py-2 rounded-xl transition duration-150 active:scale-95 text-center cursor-pointer"
+              >
+                Auto-Detect Origin
+              </button>
+            </div>
           </div>
         </div>
 

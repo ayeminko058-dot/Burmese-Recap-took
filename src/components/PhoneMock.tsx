@@ -151,28 +151,45 @@ export default function PhoneMock({
 
   useEffect(() => {
     let lastTimeBackPressed = 0;
+    let backButtonListener: any = null;
 
-    const backButtonListener = App.addListener("backButton", () => {
-      if (currentScreen === "home") {
-        const now = Date.now();
-        if (now - lastTimeBackPressed < 2000) {
-          App.exitApp();
-        } else {
-          lastTimeBackPressed = now;
-          onAddNotification(
-            "Burmese Recap Studio",
-            "ထွက်ရန် နောက်တစ်ကြိမ် ထပ်နှိပ်ပါ (Press back again to exit)",
-            "warning"
-          );
-        }
-      } else {
-        // Navigate back to home safely and reset bottom tabs highlights
-        handlePushScreen("home");
+    if (Capacitor.isPluginAvailable("App")) {
+      try {
+        backButtonListener = App.addListener("backButton", () => {
+          if (currentScreen === "home") {
+            const now = Date.now();
+            if (now - lastTimeBackPressed < 2000) {
+              App.exitApp();
+            } else {
+              lastTimeBackPressed = now;
+              onAddNotification(
+                "Burmese Recap Studio",
+                "ထွက်ရန် နောက်တစ်ကြိမ် ထပ်နှိပ်ပါ (Press back again to exit)",
+                "warning"
+              );
+            }
+          } else {
+            // Navigate back to home safely and reset bottom tabs highlights
+            handlePushScreen("home");
+          }
+        });
+      } catch (err) {
+        console.warn("[App Plugin] Failed to register backButton listener:", err);
       }
-    });
+    }
 
     return () => {
-      backButtonListener.then((listener) => listener.remove());
+      if (backButtonListener) {
+        try {
+          backButtonListener.then((listener: any) => {
+            if (listener && typeof listener.remove === "function") {
+              listener.remove();
+            }
+          });
+        } catch (err) {
+          console.warn("[App Plugin] Failed to remove backButton listener:", err);
+        }
+      }
     };
   }, [currentScreen, lastScreen]);
 

@@ -84,10 +84,10 @@ async function generateContentWithRetry(
 
 // Helper to get Gemini API Key dynamically from request
 function getRequestApiKey(req: express.Request): string | null {
+  // Strictly require the API key passed from the client frontend UI (Settings input)
   const key = (req.headers["x-gemini-api-key"] as string) || 
               req.body.apiKey || 
-              (req.headers["authorization"] as string)?.replace("Bearer ", "") ||
-              process.env.GEMINI_API_KEY;
+              (req.headers["authorization"] as string)?.replace("Bearer ", "");
   return key || null;
 }
 
@@ -282,7 +282,9 @@ app.post("/api/tts", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
+      const edgeTtsHost = process.env.VITE_APP_URL || "https://my-edge-tts-api.vercel.app";
+      const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
+      const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
       const response = await fetch(ttsUrl);
       if (!response.ok) {
@@ -367,7 +369,9 @@ app.post("/api/generate-voice", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const ttsUrl = `https://my-edge-tts-api.vercel.app/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
+      const edgeTtsHost = process.env.VITE_APP_URL || "https://my-edge-tts-api.vercel.app";
+      const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
+      const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
       const response = await fetch(ttsUrl);
       if (!response.ok) {

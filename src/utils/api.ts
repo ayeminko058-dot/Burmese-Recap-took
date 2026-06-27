@@ -1,7 +1,8 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 // Dedicated configuration variable for the external Live Server URL (HTTPS)
-export const LIVE_SERVER_URL = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+export const LIVE_SERVER_URL = "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+export const PRODUCTION_SERVER_URL = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
 
 /**
  * Returns a fully qualified absolute URL for API calls in native environments,
@@ -13,6 +14,16 @@ export function getApiUrl(endpoint: string): string {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
 
   if (typeof window !== "undefined") {
+    // Check if there is a custom server URL configured in localStorage first (allows overriding)
+    const savedServerUrl = localStorage.getItem("server_url");
+    if (savedServerUrl && savedServerUrl.trim()) {
+      let base = savedServerUrl.trim();
+      while (base.endsWith("/")) {
+        base = base.slice(0, -1);
+      }
+      return `${base}${cleanEndpoint}`;
+    }
+
     const platform = Capacitor.getPlatform();
     const origin = window.location.origin;
 
@@ -23,29 +34,12 @@ export function getApiUrl(endpoint: string): string {
       }
       return cleanEndpoint;
     }
-
-    // Check if there is a custom server URL configured in localStorage
-    const savedServerUrl = localStorage.getItem("server_url");
-    if (savedServerUrl && savedServerUrl.trim()) {
-      let base = savedServerUrl.trim();
-      // Strips trailing slashes to prevent double slashes like "https://host.com//api/endpoint"
-      while (base.endsWith("/")) {
-        base = base.slice(0, -1);
-      }
-      return `${base}${cleanEndpoint}`;
-    }
   }
 
-  // Check if there is a VITE_APP_URL environment variable from build configurations
-  const envUrl = (import.meta as any).env?.VITE_APP_URL;
-  if (envUrl && envUrl.trim()) {
-    let base = envUrl.trim();
-    while (base.endsWith("/")) {
-      base = base.slice(0, -1);
-    }
-    return `${base}${cleanEndpoint}`;
-  }
-
+  // Note: We do not check VITE_APP_URL here because VITE_APP_URL is specifically reserved
+  // for the external Edge-TTS audio generation server. Our actual Express backend routes
+  // (Voice-to-Text, Translation, etc.) run on the app container itself.
+  
   // Fallback to our dedicated external Live Server URL
   return `${LIVE_SERVER_URL}${cleanEndpoint}`;
 }
