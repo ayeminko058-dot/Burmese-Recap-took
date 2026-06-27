@@ -282,7 +282,10 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         // Convert audio binary stream (Blob) into a clean Base64 Data URI stream immediately in the client via FileReader to guarantee cross-platform support in mobile browsers/WebViews
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64DataUrl = reader.result as string;
+          let base64DataUrl = reader.result as string;
+          if (base64DataUrl.startsWith("data:audio/mpeg;")) {
+            base64DataUrl = base64DataUrl.replace("data:audio/mpeg;", "data:audio/mp3;");
+          }
           setSyncedAudioUrl(base64DataUrl);
           setProgressLog("");
           setIsSynthesizing(false);
@@ -587,14 +590,17 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
                   console.warn("[TtsStudio] Object URL playback blocked or failed. Activating Base64 fallback decoding pipeline...");
                   const reader = new FileReader();
                   reader.onloadend = () => {
-                    const base64DataUrl = reader.result as string;
+                    let base64DataUrl = reader.result as string;
+                    if (base64DataUrl.startsWith("data:audio/mpeg;")) {
+                      base64DataUrl = base64DataUrl.replace("data:audio/mpeg;", "data:audio/mp3;");
+                    }
                     setSyncedAudioUrl(base64DataUrl);
                   };
                   reader.readAsDataURL(compiledBlobRef.current);
                   return;
                 }
 
-                console.error("Audio playback error: Failed to load audio source or unsupported format");
+                console.warn("[TtsStudio] Audio playback error: Failed to load audio source or unsupported format");
                 setAudioPlayState(false);
                 onAddNotification(
                   "Playback Error", 
