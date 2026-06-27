@@ -38,13 +38,25 @@ jobs:
             -keypass androidpassword \
             -dname "CN=MyanmarSol, OU=Development, O=BurmeseRecapStudio, L=Yangon, S=Yangon, C=MM"
 
+      - name: Configure Bubblewrap Paths
+        run: |
+          mkdir -p ~/.bubblewrap
+          cat <<EOF > ~/.bubblewrap/config.json
+          {
+            "jdkPath": "$JAVA_HOME",
+            "androidSdkPath": "$ANDROID_HOME"
+          }
+          EOF
+          echo "Bubblewrap Config:"
+          cat ~/.bubblewrap/config.json
+
       - name: Bubblewrap Build (APK and AAB Generation)
         run: |
           # Use non-interactive bubblewrap command execution
           yes | bubblewrap doctor || true
           
           # Build using the created keystore and configured twa-manifest.json
-          bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey" --signingKeyPassword="androidpassword" --storePassword="androidpassword"
+          yes | bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey" --signingKeyPassword="androidpassword" --storePassword="androidpassword"
 
       - name: Upload Signing Fingerprints & APK
         uses: actions/upload-artifact@v4
