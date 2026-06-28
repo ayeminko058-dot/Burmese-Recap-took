@@ -1,4 +1,4 @@
-name: Build Android APK
+Name: Build Android APK
 on:
   push:
     branches: [ main ]
@@ -23,6 +23,15 @@ jobs:
 
       - name: Install Project Dependencies
         run: npm install
+
+      # 🌟 Vercel Backend Link ကို .env ထဲသို့ ထည့်သွင်းပေးသည့် အဆင့် ဖြစ်ပါတယ် 🌟
+      - name: Inject Vercel Backend URL into Project
+        run: |
+          echo "VITE_APP_URL=https://my-edge-tts-api.vercel.app" > .env
+          echo "APP_URL=https://my-edge-tts-api.vercel.app" >> .env
+          echo "GEMINI_API_KEY=user_will_provide_it" >> .env
+          echo "Generated .env file check:"
+          cat .env
 
       - name: Build Web Assets & Sync Capacitor Android
         run: |
