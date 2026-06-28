@@ -24,6 +24,9 @@ jobs:
         
     - name: Configure Capacitor Wrapper Link
       run: |
+        # Remove conflicting JSON config to prevent Capacitor from failing on duplicate config files
+        rm -f capacitor.config.json
+        
         cat <<EOF> capacitor.config.ts
         import { CapacitorConfig } from '@capacitor/cli';
         const config: CapacitorConfig = {
@@ -52,24 +55,28 @@ jobs:
         distribution: 'zulu'
         java-version: '17'
 
-    - name: Setup Android SDK Target
-      uses: android-actions/setup-android@v3
-
     - name: Force Generate Android Shell
       run: |
-        npx cap add android || true
+        # The android folder is already present in the workspace, so we sync directly.
+        # If it doesn't exist, we add it first.
+        if [ ! -d "android" ]; then
+          npx cap add android || true
+        fi
         npx cap sync android || true
 
     - name: Bypass Network Security Constraints
       run: |
-        sed -i '/<\/application>/i \    <uses-library android:name="org.apache.http.legacy" android:required="false" />' android/app/src/main/AndroidManifest.xml || true
+        # Ensure the Manifest exists and update it
+        if [ -f "android/app/src/main/AndroidManifest.xml" ]; then
+          sed -i '/<\/application>/i \    <uses-library android:name="org.apache.http.legacy" android:required="false" />' android/app/src/main/AndroidManifest.xml || true
+        fi
         chmod +x android/gradlew || true
 
     - name: Compile and Force Build APK
       run: |
         cd android
         ./gradlew assembleDebug --stacktrace || ./gradlew assembleDebug -x test
-
+        
     - name: Upload Finished Live Link APK
       uses: actions/upload-artifact@v4
       with:
