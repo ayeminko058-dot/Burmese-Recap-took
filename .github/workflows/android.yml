@@ -1,4 +1,5 @@
 name: Generate Android APK/AAB via Bubblewrap
+
 on:
   push:
     branches: [ main ]
@@ -21,13 +22,6 @@ jobs:
         with:
           distribution: 'zulu'
           java-version: '17'
-
-      # 🌟 အမှားကင်းအောင် ပုံစံပြောင်းပြီး .env ဖိုင် ဆောက်ခိုင်းခြင်း 🌟
-      - name: Create Environment File
-        run: |
-          echo "VITE_APP_URL=https://my-edge-tts-api.vercel.app" > .env
-          echo "APP_URL=https://my-edge-tts-api.vercel.app" >> .env
-          echo "GEMINI_API_KEY=user_will_provide_it" >> .env
 
       - name: Install Bubblewrap CLI
         run: npm install -g @bubblewrap/cli
@@ -53,13 +47,21 @@ jobs:
             "androidSdkPath": "$ANDROID_HOME"
           }
           EOF
+          echo "Bubblewrap Config:"
+          cat ~/.bubblewrap/config.json
 
       - name: Bubblewrap Build (APK and AAB Generation)
         run: |
+          # Doctor diagnostic check to ensure runtime SDK dependencies are met
           yes | bubblewrap doctor || true
+          
+          # Initialize or validate manifest structure
           if [ ! -f "twa-manifest.json" ]; then
+            echo "Initializing twa-manifest.json from manifest.json..."
             yes | bubblewrap init --manifest="manifest.json" || true
           fi
+          
+          # Perform non-interactive deployment build
           yes | bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey" --signingKeyPassword="androidpassword" --storePassword="androidpassword"
 
       - name: Upload Signing Fingerprints & APK

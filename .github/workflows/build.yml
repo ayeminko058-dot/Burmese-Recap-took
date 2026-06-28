@@ -2,7 +2,6 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
 
 jobs:
   build:
@@ -22,13 +21,6 @@ jobs:
         with:
           node-version: '22'
 
-      # 🌟 အမှားကင်းအောင် ပုံစံပြောင်းပြီး .env ဖိုင် ဆောက်ခိုင်းခြင်း 🌟
-      - name: Create Environment File
-        run: |
-          echo "VITE_APP_URL=https://my-edge-tts-api.vercel.app" > .env
-          echo "APP_URL=https://my-edge-tts-api.vercel.app" >> .env
-          echo "GEMINI_API_KEY=user_will_provide_it" >> .env
-
       - name: Install Project Dependencies
         run: npm install
 
@@ -40,6 +32,7 @@ jobs:
 
       - name: Wipe Corrupt Wrapper Jar
         run: |
+          # Completely remove the corrupt jar file from the workplace environment before setup
           rm -f android/gradle/wrapper/gradle-wrapper.jar
 
       - name: Inject Genuine Whisper Model Asset
@@ -47,6 +40,7 @@ jobs:
           mkdir -p android/app/src/main/assets/
           rm -f android/app/src/main/assets/whisper-tiny.bin
           curl -L "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin" -o android/app/src/main/assets/whisper-tiny.bin
+          ls -lh android/app/src/main/assets/
 
       - name: Setup Dynamic Gradle Tooling (Clean Installation)
         uses: gradle/actions/setup-gradle@v3
