@@ -1,4 +1,4 @@
-name: Generate Android APK/AAB via Bubblewrap
+Name: Generate Android APK/AAB via Bubblewrap
 
 on:
   push:
@@ -49,6 +49,15 @@ jobs:
           EOF
           echo "Bubblewrap Config:"
           cat ~/.bubblewrap/config.json
+
+      # 🌟 Vercel Backend Link ကို .env ထဲသို့ အလိုအလျောက် ထည့်သွင်းပေးသည့် အဆင့် ဖြစ်ပါတယ် 🌟
+      - name: Inject Vercel Backend URL into Project
+        run: |
+          echo "VITE_APP_URL=https://my-edge-tts-api.vercel.app" > .env
+          echo "APP_URL=https://my-edge-tts-api.vercel.app" >> .env
+          echo "GEMINI_API_KEY=user_will_provide_it" >> .env
+          echo "Generated .env file check:"
+          cat .env
 
       - name: Bubblewrap Build (APK and AAB Generation)
         run: |
