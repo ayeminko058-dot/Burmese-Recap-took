@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { 
-  FileText, Plus, Trash2, Copy, Download, Play, Pause, RotateCcw, Upload, HelpCircle, Sparkles, Check, Info, Layout
+  FileText, Plus, Trash2, Copy, Download, Play, Pause, RotateCcw, Upload, HelpCircle, Sparkles, Check, Info, Layout, Loader2
 } from "lucide-react";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { triggerInterstitialAd } from "../utils/admob";
@@ -297,6 +297,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
   const [blocks, setBlocks] = useState<any[]>([]);
   const [alignmentFinished, setAlignmentFinished] = useState(false);
   const [isDownloadingSrt, setIsDownloadingSrt] = useState(false);
+  const [isAdActive, setIsAdActive] = useState(false);
 
   const triggerAlert = async (message: string, title: string = "ဒေါင်းလုဒ်အခြေအနေ") => {
     if (typeof (window as any).customAlert === "function") {
@@ -317,6 +318,67 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
   const [mediaObjectUrl, setMediaObjectUrl] = useState<string | null>(null);
   const [mediaDuration, setMediaDuration] = useState<number>(0); // dynamic media playback duration
   const [mediaFile, setMediaFile] = useState<File | null>(null);
+
+  // Extracted audio upload states
+  const [isExtractingAudio, setIsExtractingAudio] = useState(false);
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const [uploadedAudioRef, setUploadedAudioRef] = useState<{ fileUri: string; mimeType: string; name: string } | null>(null);
+  const [isUploadingToGemini, setIsUploadingToGemini] = useState(false);
+
+  const handleExtractAndUploadAudio = async (file: File) => {
+    setIsUploadingToGemini(true);
+    const activeApiKey = geminiApiKey || localStorage.getItem("gemini_api_key") || "";
+    if (!activeApiKey) {
+      onAddNotification("API Key Required", "Google Gemini API Key is required. Please input your key in the box below first.", "warning");
+      setIsUploadingToGemini(false);
+      return;
+    }
+
+    try {
+      setIsExtractingAudio(true);
+      onAddNotification("Extracting Audio", "Extracting high-fidelity, light mono audio stream...", "info");
+      
+      const { extractAudioTrack } = await import("../utils/audioExtractor");
+      const audioBlob = await extractAudioTrack(file);
+      
+      setIsExtractingAudio(false);
+      setIsUploadingAudio(true);
+      onAddNotification("Uploading to Google AI", "Streaming audio cache to Google AI Studio File API...", "info");
+
+      const formData = new FormData();
+      formData.append("file", audioBlob, "extracted_audio.wav");
+
+      const uploadUrl = getApiUrl("/api/subtitle/upload-audio");
+      const response = await safeFetch(uploadUrl, {
+        method: "POST",
+        headers: {
+          "x-gemini-api-key": geminiApiKey || localStorage.getItem("gemini_api_key") || "",
+        },
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData?.error?.message || "Audio upload failed on server.");
+      }
+
+      const resData = await response.json();
+      setUploadedAudioRef({
+        fileUri: resData.fileUri,
+        mimeType: resData.mimeType,
+        name: resData.name,
+      });
+      setIsUploadingAudio(false);
+      setIsUploadingToGemini(false);
+      onAddNotification("Cached successfully", "Acoustic cache compiled on Google Cloud and ready for alignment.", "success");
+    } catch (err: any) {
+      console.error("[Audio Extraction/Upload Failed]:", err);
+      setIsExtractingAudio(false);
+      setIsUploadingAudio(false);
+      setIsUploadingToGemini(false);
+      onAddNotification("Pre-Processing Failure", err.message || "Failed to process audio offline.", "warning");
+    }
+  };
 
   // Global settings API key sync state
   const [geminiApiKey, setGeminiApiKey] = useState<string>(() => localStorage.getItem("gemini_api_key") || "");
@@ -436,6 +498,9 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
     stopSimulation();
     
     onAddNotification("Media Stream Loaded", `Incorporated: ${name} (${mbSize} MB)`, "success");
+
+    // Immediately trigger backstage audio track extraction & cache upload
+    handleExtractAndUploadAudio(file);
   };
 
   const handleClearMedia = () => {
@@ -451,6 +516,8 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
     setMediaFileSize("0 MB");
     setMediaObjectUrl(null);
     setMediaDuration(0);
+    setUploadedAudioRef(null);
+    setIsUploadingToGemini(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -518,8 +585,14 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
     return segments;
   };
 
-  // 3. WHISPER FORCED ALIGNMENT ENGINE PIPELINE
+  // 3. MULTIMODAL GEMINI ALIGNMENT ENGINE PIPELINE
   const handleAutoAlignment = () => {
+    const activeApiKey = geminiApiKey || localStorage.getItem("gemini_api_key") || "";
+    if (!activeApiKey) {
+      onAddNotification("API Key Required", "Google Gemini API Key is required. Please input your key in the box below first.", "warning");
+      return;
+    }
+
     const rawText = script.trim();
     if (!rawText) {
       onAddNotification("Empty Input", "Please provide a valid script text first.", "warning");
@@ -531,39 +604,93 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
       return;
     }
 
-    // Exact media duration or fallback inside simulator 60,000ms
-    const activeMediaDurationMs = videoRef.current && videoRef.current.duration 
-      ? Math.round(videoRef.current.duration * 1000) 
-      : 60000;
-
-    const segments = parseScriptPunctuation(rawText);
-    if (segments.length === 0) {
-      onAddNotification("Parse Incomplete", "No sentences separated by [ . ] or [ ။ ] found.", "warning");
+    if (isUploadingToGemini || (mediaFile && !uploadedAudioRef)) {
+      onAddNotification("Still Preparing", "Media asset preparation is still rendering, please wait a brief moment.", "warning");
       return;
     }
 
-    setIsAligning(true);
-    setAligningProgress(15);
-    setAligningStatus("Stage 1: Whisper Audio Analysis - Initializing local audio extraction...");
+    if (!uploadedAudioRef) {
+      onAddNotification("Initiating Extract", "Acoustic cache not found. Re-extracting and uploading audio track...", "info");
+      handleExtractAndUploadAudio(mediaFile);
+      return;
+    }
 
     const alignSubtitles = async () => {
       try {
-        await new Promise((resolve) => setTimeout(resolve, 600));
         setAligningProgress(40);
-        setAligningStatus("Stage 1: Client-Side Audio Analysis - Extracting acoustic timelines...");
+        setAligningStatus("Running multimodal audio-to-script alignment on gemini-3.5-flash...");
 
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        setAligningProgress(70);
-        setAligningStatus("Stage 2: Script Text Tokenization - Splitting Burmese sentences into syllable consonant boundaries...");
+        const alignUrl = getApiUrl("/api/subtitle/align-gemini");
+        const response = await safeFetch(alignUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-gemini-api-key": geminiApiKey || localStorage.getItem("gemini_api_key") || "",
+          },
+          body: JSON.stringify({
+            fileUri: uploadedAudioRef.fileUri,
+            mimeType: uploadedAudioRef.mimeType,
+            scriptText: rawText,
+          }),
+        });
 
-        await new Promise((resolve) => setTimeout(resolve, 500));
-        setAligningProgress(90);
-        setAligningStatus("Stage 3: Snapping sentence boundaries to absolute audio milliseconds...");
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData?.error?.message || "Failed to align script with audio track.");
+        }
 
-        // Character-proportional baseline layout (our golden fallback, executed locally and instantaneously)
+        setAligningProgress(85);
+        setAligningStatus("Finalizing subtitle boundaries...");
+
+        const result = await response.json();
+        
+        // Map block values to match our component's block definition (id, startMs, endMs, rawText, displayText)
+        const alignedBlocks = result.blocks.map((b: any) => ({
+          id: b.id,
+          startMs: b.startMs,
+          endMs: b.endMs,
+          rawText: b.text,
+          displayText: BurmeseSubtitleEngine.applyStackingRules(b.text),
+        }));
+
+        setAligningProgress(100);
+        setAligningStatus("Alignment complete successfully!");
+        await new Promise((resolve) => setTimeout(resolve, 300));
+
+        setBlocks(alignedBlocks);
+        setAlignmentFinished(true);
+        setSimulationProgressMs(0);
+        stopSimulation();
+        setIsAligning(false);
+
+        onAddNotification(
+          "AI Subtitle Alignment Completed", 
+          `Aligned ${alignedBlocks.length} subtitle timelines using Gemini.`, 
+          "success"
+        );
+      } catch (error: any) {
+        console.error("[Gemini Alignment Error]:", error);
+        
+        // Dynamic Fallback to local proportional layout when Gemini Alignment fails (safeguards offline user UX)
+        onAddNotification(
+          "Gemini Alignment Failed", 
+          `${error.message || "Could not align script automatically"}. Falling back to offline proportional alignment...`, 
+          "warning"
+        );
+        
+        const activeMediaDurationMs = videoRef.current && videoRef.current.duration 
+          ? Math.round(videoRef.current.duration * 1000) 
+          : 60000;
+
+        const segments = parseScriptPunctuation(rawText);
+        if (segments.length === 0) {
+          setIsAligning(false);
+          return;
+        }
+
         const totalChars = segments.reduce((sum, s) => sum + s.replace(/[\.။\s]/g, "").length, 0);
         let progressAccumulatorMs = 0;
-        const alignedBlocks = segments.map((seg, idx) => {
+        const fallbackBlocks = segments.map((seg, idx) => {
           const cleanSeg = seg.replace(/[\.။]/g, "").trim();
           const blockLength = cleanSeg.length;
           const blockPeriod = totalChars > 0 
@@ -586,34 +713,28 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
           };
         });
 
-        await new Promise((resolve) => setTimeout(resolve, 400));
-        setAligningProgress(100);
-        setAligningStatus("Alignment complete successfully!");
-        await new Promise((resolve) => setTimeout(resolve, 300));
-
-        setBlocks(alignedBlocks);
+        setBlocks(fallbackBlocks);
         setAlignmentFinished(true);
         setSimulationProgressMs(0);
         stopSimulation();
         setIsAligning(false);
-
-        onAddNotification(
-          "Whisper Forced Alignment Completed", 
-          `Snapped ${alignedBlocks.length} subtitle syllable boundaries dynamically on-device.`, 
-          "success"
-        );
-      } catch (error: any) {
-        console.error("[Whisper Alignment Error]:", error);
-        onAddNotification(
-          "Alignment Failed", 
-          error.message || "An error occurred during calibration.", 
-          "warning"
-        );
-        setIsAligning(false);
       }
     };
 
-    alignSubtitles();
+    setIsAdActive(true);
+    triggerInterstitialAd(
+      "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး AI စနစ်ဖြင့် စာတန်းထိုး တိုက်ဆိုင်ညှိနှိုင်းမှုကို စတင်ပါ",
+      () => {
+        setIsAligning(true);
+        setAligningProgress(20);
+        setAligningStatus("Contacting Google Gemini API...");
+        alignSubtitles();
+      },
+      onAddNotification,
+      () => {
+        setIsAdActive(false);
+      }
+    );
   };
 
   // Clear workspace
@@ -723,6 +844,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
   const handleDownloadSrtText = () => {
     if (blocks.length === 0) return;
 
+    setIsAdActive(true);
     triggerInterstitialAd(
       "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာတန်းထိုး SRT ကို ရယူပါ",
       async () => {
@@ -783,13 +905,17 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
           }
         }
       },
-      onAddNotification
+      onAddNotification,
+      () => {
+        setIsAdActive(false);
+      }
     );
   };
 
   const handleCopySrtText = () => {
     if (blocks.length === 0) return;
 
+    setIsAdActive(true);
     triggerInterstitialAd(
       "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး စာတန်းထိုး SRT ကို ရယူပါ",
       () => {
@@ -800,7 +926,10 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
           setTimeout(() => setJustCopied(false), 2000);
         });
       },
-      onAddNotification
+      onAddNotification,
+      () => {
+        setIsAdActive(false);
+      }
     );
   };
 
@@ -850,10 +979,10 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
               <div className="space-y-1">
                 <h3 className="text-xs font-bold text-slate-100 flex items-center gap-2 uppercase tracking-wider">
                   <span className="text-indigo-500 font-extrabold">◆</span>
-                  Local Precision Studio
+                  Gemini Precision Studio
                 </h3>
                 <p className="text-[9px] text-slate-450">
-                  100% Offline forced alignment container for Video + Burmese Script
+                  Multimodal Gemini-powered forced alignment studio for Video + Burmese Script
                 </p>
               </div>
 
@@ -882,6 +1011,9 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                     setMediaObjectUrl(objectUrl);
                     stopSimulation();
                     onAddNotification("Media Stream Loaded", `Incorporated: ${name} (${mbSize} MB)`, "success");
+
+                    // Immediately trigger backstage audio track extraction & cache upload
+                    handleExtractAndUploadAudio(file);
                   }
                 }}
                 className={`border border-dashed transition duration-200 space-y-2 relative ${
@@ -905,9 +1037,29 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                     <p className="text-xs font-semibold text-slate-200 truncate max-w-[240px] mx-auto">
                       {mediaFileName}
                     </p>
-                    <p className="text-[9px] text-slate-400 mt-0.5">
-                      {mediaFile ? `Loaded (${mediaFileSize})` : "Drag & drop video/audio here or click to upload"}
-                    </p>
+                    {isExtractingAudio && (
+                      <p className="text-[9px] text-amber-400 mt-0.5 animate-pulse flex items-center justify-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                        Converting video to acoustic track...
+                      </p>
+                    )}
+                    {isUploadingAudio && (
+                      <p className="text-[9px] text-indigo-400 mt-0.5 animate-pulse flex items-center justify-center gap-1">
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                        Caching audio to Google AI Studio...
+                      </p>
+                    )}
+                    {!isExtractingAudio && !isUploadingAudio && uploadedAudioRef && (
+                      <p className="text-[9px] text-emerald-400 mt-0.5 flex items-center justify-center gap-1">
+                        <span className="text-emerald-400 font-extrabold">✓</span>
+                        Audio track cached & ready for alignment
+                      </p>
+                    )}
+                    {!isExtractingAudio && !isUploadingAudio && !uploadedAudioRef && (
+                      <p className="text-[9px] text-slate-400 mt-0.5">
+                        {mediaFile ? `Loaded (${mediaFileSize})` : "Drag & drop video/audio here or click to upload"}
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -998,7 +1150,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                           {aligningProgress > 30 ? "✓" : "1"}
                         </div>
                         <div className={aligningProgress >= 15 ? "text-slate-200 font-bold" : "text-slate-500"}>
-                          Stage 1: Whisper Audio Analysis...
+                          Stage 1: Uploading & Processing via Gemini API...
                         </div>
                       </div>
 
@@ -1068,11 +1220,30 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                     {/* Main Action Trigger */}
                     <button
                       type="button"
+                      disabled={isUploadingToGemini || isAdActive}
                       onClick={handleAutoAlignment}
-                      className="w-full py-2 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 active:scale-[0.98]"
+                      className={`w-full py-2 px-4 font-bold text-xs rounded-xl shadow-lg transition-all flex items-center justify-center gap-2 select-none ${
+                        isUploadingToGemini || isAdActive
+                          ? "bg-[#1E293B] border border-slate-700/80 text-slate-400 cursor-not-allowed pointer-events-none opacity-80" 
+                          : "bg-indigo-600 hover:bg-indigo-500 text-white active:scale-[0.98] cursor-pointer"
+                      }`}
                     >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Align Subtitles with Local Precision</span>
+                      {isUploadingToGemini ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-450" />
+                          <span>⏳ Processing Video Stream & Uploading to Gemini... Please wait.</span>
+                        </>
+                      ) : isAdActive ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-indigo-450" />
+                          <span>⏳ Preparing Reward/Interstitial Ad... Please wait</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5" />
+                          <span>✨ Align Subtitles with Gemini Precision</span>
+                        </>
+                      )}
                     </button>
                   </>
                 )}
@@ -1200,13 +1371,18 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                     <button
                       type="button"
                       onClick={handleDownloadSrtText}
-                      disabled={blocks.length === 0 || isDownloadingSrt}
-                      className="py-1.5 px-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10.5px] rounded-lg shadow-md transition-all flex items-center gap-1"
+                      disabled={blocks.length === 0 || isDownloadingSrt || isAdActive}
+                      className="py-1.5 px-3 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-600 text-white font-bold text-[10.5px] rounded-lg shadow-md transition-all flex items-center gap-1 select-none"
                     >
                       {isDownloadingSrt ? (
                         <>
                           <div className="w-3 h-3 border-2 border-t-transparent border-white rounded-full animate-spin" />
                           <span>Downloading...</span>
+                        </>
+                      ) : isAdActive ? (
+                        <>
+                          <div className="w-3 h-3 border-2 border-t-transparent border-white rounded-full animate-spin" />
+                          <span>Ad Active...</span>
                         </>
                       ) : (
                         <>
@@ -1218,10 +1394,10 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
                     <button
                       type="button"
                       onClick={handleCopySrtText}
-                      disabled={blocks.length === 0}
-                      className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 font-semibold text-[10.5px] rounded-lg transition"
+                      disabled={blocks.length === 0 || isAdActive}
+                      className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-300 font-semibold text-[10.5px] rounded-lg transition select-none"
                     >
-                      {justCopied ? "Copied!" : "Copy SRT"}
+                      {isAdActive ? "Ad Active..." : justCopied ? "Copied!" : "Copy SRT"}
                     </button>
                   </div>
                 </div>
@@ -1346,16 +1522,16 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
               </div>
               <div>
                 <h3 className="text-xs font-extrabold text-white uppercase tracking-wider">Forced Alignment Pipeline</h3>
-                <p className="text-[9px] text-slate-450 font-mono">Status: ACTIVE OFFLINE FLOW</p>
+                <p className="text-[9px] text-indigo-400 font-mono font-bold animate-pulse">Status: MULTIMODAL GEMINI FLOW</p>
               </div>
             </div>
 
             <div className="space-y-3">
-              {/* Step 1: Transcribing via Whisper */}
+              {/* Step 1: Uploading & Processing via Gemini API */}
               <div className="flex items-center justify-between p-2.5 rounded-lg bg-black/20 border border-slate-900">
                 <div className="flex items-center gap-2.5">
                   <div className={`w-2 h-2 rounded-full ${aligningProgress < 40 ? 'bg-indigo-500 animate-ping' : aligningProgress >= 40 ? 'bg-green-500' : 'bg-slate-700'}`} />
-                  <span className={`text-xs ${aligningProgress < 40 ? 'text-indigo-400 font-bold' : 'text-slate-400'}`}>1. Transcribing via Whisper</span>
+                  <span className={`text-xs ${aligningProgress < 40 ? 'text-indigo-400 font-bold' : 'text-slate-400'}`}>1. Uploading & Processing via Gemini API</span>
                 </div>
                 {aligningProgress >= 40 ? (
                   <Check className="w-4 h-4 text-green-500" />
@@ -1410,7 +1586,7 @@ export default function SubtitleStudio({ onAddNotification, onAddDownloadedFile,
             </div>
 
             <p className="text-[9px] text-slate-400 leading-relaxed font-normal">
-              Analyzing audio waveform peaks sequentially to match Burmese transcript syllables. Timestamps are snapped dynamically to speech envelopes while keeping manual block structures intact.
+              Uploading and analyzing acoustic streams with Google Gemini API. Sentence-level boundaries are aligned based on Burmese script punctuation blocks to generate high-precision SRT subtitle timestamps.
             </p>
           </div>
         </div>

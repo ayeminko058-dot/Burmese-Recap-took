@@ -1,8 +1,5 @@
 import { Capacitor, CapacitorHttp } from "@capacitor/core";
-
-// Dedicated configuration variable for the external Live Server URL (HTTPS)
-export const LIVE_SERVER_URL = "https://ais-dev-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
-export const PRODUCTION_SERVER_URL = "https://ais-pre-gw5iw4avvqz4fmkrhq2mim-33484223713.asia-southeast1.run.app";
+import { DEFAULT_API_BASE_URL } from "../config";
 
 /**
  * Returns a fully qualified absolute URL for API calls in native environments,
@@ -14,34 +11,21 @@ export function getApiUrl(endpoint: string): string {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
 
   if (typeof window !== "undefined") {
-    // Check if there is a custom server URL configured in localStorage first (allows overriding)
-    const savedServerUrl = localStorage.getItem("server_url");
-    if (savedServerUrl && savedServerUrl.trim()) {
-      let base = savedServerUrl.trim();
-      while (base.endsWith("/")) {
-        base = base.slice(0, -1);
-      }
-      return `${base}${cleanEndpoint}`;
-    }
-
     const platform = Capacitor.getPlatform();
-    const origin = window.location.origin;
 
-    // Auto-save the origin if running on the web (this registers the Cloud Run URL automatically)
+    // On the web, we must ALWAYS return the relative endpoint to prevent stale absolute URLs
     if (platform === "web" || (platform !== "ios" && platform !== "android")) {
-      if (origin && !origin.includes("localhost") && !origin.includes("127.0.0.1") && !origin.includes("capacitor://")) {
-        localStorage.setItem("server_url", origin);
-      }
       return cleanEndpoint;
     }
   }
 
-  // Note: We do not check VITE_APP_URL here because VITE_APP_URL is specifically reserved
-  // for the external Edge-TTS audio generation server. Our actual Express backend routes
-  // (Voice-to-Text, Translation, etc.) run on the app container itself.
-  
-  // Fallback to our dedicated external Live Server URL
-  return `${LIVE_SERVER_URL}${cleanEndpoint}`;
+  // For native mobile apps (iOS/Android), use our hidden, persistent static fallback string
+  // which handles silent server discovery automatically
+  let base = DEFAULT_API_BASE_URL;
+  while (base.endsWith("/")) {
+    base = base.slice(0, -1);
+  }
+  return `${base}${cleanEndpoint}`;
 }
 
 /**
@@ -68,7 +52,7 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
         const text = await clone.text().catch(() => "");
         const trimmed = text.trim();
         if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
-          throw new Error("Server Network Error: Invalid content-type received from server (Expected JSON, but received HTML page).");
+          throw new Error(`Server Network Error: Invalid content-type received from server (Expected JSON, but received HTML page). Content snippet: ${trimmed.slice(0, 300)}`);
         }
       }
       return rawRes;
@@ -156,7 +140,7 @@ export async function safeFetch(url: string, options: any = {}): Promise<Respons
       if (typeof responseBody === "string") {
         const trimmed = responseBody.trim();
         if (trimmed.startsWith("<!doctype") || trimmed.startsWith("<!DOCTYPE") || trimmed.startsWith("<html") || trimmed.startsWith("<HTML")) {
-          throw new Error("Server Network Error: Expected JSON response, but received HTML response page from server.");
+          throw new Error(`Server Network Error: Expected JSON response, but received HTML response page from server. Content snippet: ${trimmed.slice(0, 300)}`);
         }
       }
     }

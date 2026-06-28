@@ -24,6 +24,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [copiedInput, setCopiedInput] = useState<boolean>(false);
   const [copiedOutput, setCopiedOutput] = useState<boolean>(false);
+  const [isAdActive, setIsAdActive] = useState<boolean>(false);
   
   // Local state API key for status check
   const [apiKeySet, setApiKeySet] = useState<boolean>(false);
@@ -57,6 +58,7 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
       return;
     }
 
+    setIsAdActive(true);
     triggerInterstitialAd(
       "ဗီဒီယိုကြော်ငြာတစ်ခုကြည့်ပြီး Gemini AI ဖြင့် အခမဲ့ ဘာသာပြန်ပါ",
       async () => {
@@ -109,7 +111,10 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           onAddNotification("Translation Failed", err.message || "Could not translate text.", "warning");
         }
       },
-      onAddNotification
+      onAddNotification,
+      () => {
+        setIsAdActive(false);
+      }
     );
   };
 
@@ -353,10 +358,10 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
       {/* Main Trigger Translate Button */}
       <button
         onClick={handleTranslate}
-        disabled={status === "translating" || !inputText.trim()}
+        disabled={status === "translating" || isAdActive || !inputText.trim()}
         className={`w-full py-3 px-4 rounded-xl flex items-center justify-center gap-1.5 text-[10px] font-bold uppercase tracking-wider transition-all duration-200 ${
-          status === "translating" || !inputText.trim()
-            ? "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed"
+          status === "translating" || isAdActive || !inputText.trim()
+            ? "bg-slate-800 text-slate-500 border border-slate-700/50 cursor-not-allowed select-none pointer-events-none"
             : "bg-emerald-600 hover:bg-emerald-500 text-white border border-emerald-500 shadow-lg shadow-emerald-500/10 cursor-pointer"
         }`}
       >
@@ -364,6 +369,11 @@ export default function Translator({ onAddNotification, onQuickAccessSettings }:
           <>
             <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
             <span>Consulting translation matrices...</span>
+          </>
+        ) : isAdActive ? (
+          <>
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-white" />
+            <span>⏳ Preparing Reward/Interstitial Ad... Please wait</span>
           </>
         ) : (
           <>

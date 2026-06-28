@@ -28,12 +28,18 @@ app.use(express.urlencoded({ limit: "100mb", extended: true }));
 
 /**
  * Model helper to map deprecated models like gemini-1.5-flash to the stable,
- * modern, non-503-error gemini-2.5-flash to satisfy safety requirements and avoid API issues.
+ * modern, non-503-error gemini-3.5-flash to satisfy safety requirements and avoid API issues.
  */
 function getActiveModel(requestedModel?: string): string {
-  const req = requestedModel || "gemini-2.5-flash";
-  if (req.includes("gemini-1.5-flash") || req.includes("gemini-1.5-pro") || req.includes("gemini-pro")) {
-    return "gemini-2.5-flash";
+  const req = requestedModel || "gemini-3.5-flash";
+  if (
+    req.includes("gemini-1.5-flash") || 
+    req.includes("gemini-1.5-pro") || 
+    req.includes("gemini-pro") ||
+    req.includes("gemini-2.0-flash") ||
+    req.includes("gemini-2.0-pro")
+  ) {
+    return "gemini-3.5-flash";
   }
   return req;
 }
@@ -69,8 +75,8 @@ async function generateContentWithRetry(
       
       // If it's a transient status (like 503, 429), retry with fallback or wait
       if (attempt < retries) {
-        if (currentModel === "gemini-2.5-flash") {
-          currentModel = "gemini-2.5-flash"; // Keep using 2.5-flash
+        if (currentModel === "gemini-3.5-flash") {
+          currentModel = "gemini-3.5-flash"; // Keep using 3.5-flash
         }
         await new Promise((resolve) => setTimeout(resolve, delayMs));
         delayMs *= 2;
@@ -84,10 +90,11 @@ async function generateContentWithRetry(
 
 // Helper to get Gemini API Key dynamically from request
 function getRequestApiKey(req: express.Request): string | null {
-  // Strictly require the API key passed from the client frontend UI (Settings input)
+  // Strictly require the API key passed from the client frontend UI (Settings input) or fallback to server env
   const key = (req.headers["x-gemini-api-key"] as string) || 
               req.body.apiKey || 
-              (req.headers["authorization"] as string)?.replace("Bearer ", "");
+              (req.headers["authorization"] as string)?.replace("Bearer ", "") ||
+              process.env.GEMINI_API_KEY;
   return key || null;
 }
 
@@ -133,7 +140,7 @@ app.post("/api/validate-key", async (req, res) => {
     });
 
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: "Output OK to test.",
     });
 
@@ -172,7 +179,7 @@ app.post("/api/translate", async (req, res) => {
     const prompt = `Translate this text into "${targetLang}" (Source: ${sourceLang}). Text to translate: ${text}`;
 
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: prompt,
       config: isBurmeseTarget ? {
         systemInstruction: BURMESE_STORYTELLER_INSTRUCTION,
@@ -208,7 +215,7 @@ app.post("/api/transcribe", async (req, res) => {
     });
 
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: [
         {
           inlineData: {
@@ -250,10 +257,24 @@ async function cleanupTempAudioFiles() {
   }
 }
 
+// Dedicated Edge-TTS Voice Attributes & Pitch/Rate mapping helper
+function mapVoiceStyle(style: string): { finalRate: string; finalPitch: string } {
+  const s = (style || "general").toLowerCase();
+  if (s === "cheerful") {
+    return { finalRate: "+10%", finalPitch: "+3Hz" };
+  } else if (s === "chat") {
+    return { finalRate: "+5%", finalPitch: "+1Hz" };
+  } else if (s === "newscast") {
+    return { finalRate: "-5%", finalPitch: "-2Hz" };
+  } else {
+    return { finalRate: "+0%", finalPitch: "+0Hz" };
+  }
+}
+
 // Endpoint 4: Edge-TTS Aggregator Service (Direct download / legacy fallback)
 app.post("/api/tts", async (req, res) => {
   try {
-    const { text, voice, rate, pitch, style } = req.body;
+    const { text, voice, style } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: { message: "Text parameter is required." } });
       return;
@@ -261,28 +282,8 @@ app.post("/api/tts", async (req, res) => {
 
     const selectedVoice = voice || "my-MM-NilarNeural";
     
-    // Map style characteristics to pitch & rate if they are not explicitly provided
-    let finalRate = rate;
-    let finalPitch = pitch;
-
-    if (!finalRate || !finalPitch) {
-      if (style === "cheerful") {
-        finalRate = finalRate || "+12%";
-        finalPitch = finalPitch || "+10%";
-      } else if (style === "chat") {
-        finalRate = finalRate || "+5%";
-        finalPitch = finalPitch || "+3%";
-      } else if (style === "newscast") {
-        finalRate = finalRate || "-8%";
-        finalPitch = finalPitch || "-5%";
-      } else {
-        finalRate = finalRate || "+0%";
-        finalPitch = finalPitch || "+0Hz";
-      }
-    }
-    
-    finalRate = finalRate || "+0%";
-    finalPitch = finalPitch || "+0Hz";
+    // Strict Pitch & Rate mapping depending on selected Vocal Expression style
+    const { finalRate, finalPitch } = mapVoiceStyle(style);
 
     // Split at natural sentence breaks to synthesize in cohesive chunks
     const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
@@ -322,17 +323,49 @@ app.post("/api/tts", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const edgeTtsHost = getEdgeTtsHost();
-      const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
-      const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
+      const host = "https://my-edge-tts-api.vercel.app";
+      const ttsUrl = `${host}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
-      const response = await fetch(ttsUrl);
-      if (!response.ok) {
-        throw new Error(`Edge-TTS API failed with status ${response.status}`);
-      }
+      console.log(`[TTS Synthesis /api/tts] Calling dedicated host: ${host} | Style: ${style} | Pitch: ${finalPitch} | Rate: ${finalRate}`);
+      
+      try {
+        const response = await fetch(ttsUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
 
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
+        if (!response.ok) {
+          if (response.status === 429 || response.status >= 500) {
+            throw new Error("Server Busy: Edge-TTS engine is temporarily rate-limited or overloaded. Please try again in a few seconds.");
+          }
+          throw new Error(`Edge-TTS server returned status ${response.status}`);
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("audio")) {
+          const bodyTxt = await response.text();
+          console.warn(`[TTS Synthesis] Expected audio but received: ${contentType}. Body prefix: ${bodyTxt.slice(0, 150)}`);
+          if (bodyTxt.includes("Rate limit") || bodyTxt.includes("Too Many Requests") || bodyTxt.includes("busy") || bodyTxt.includes("error")) {
+            throw new Error("Server Busy: Edge-TTS API rate limit reached or service is busy. Please try again in a few seconds.");
+          }
+          throw new Error("Server Busy: The dedicated Edge-TTS engine returned a non-audio response. Please wait a moment and try again.");
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        if (buffer.length < 100) {
+          throw new Error("Server Busy: Edge-TTS returned an empty or incomplete audio stream. Please try again.");
+        }
+
+        return buffer;
+      } catch (err: any) {
+        console.error(`[TTS Synthesis /api/tts] Error calling dedicated host:`, err.message || err);
+        if (err.message && err.message.includes("Server Busy")) {
+          throw err;
+        }
+        throw new Error(`Server Busy: Failed to communicate with the dedicated Edge-TTS host. Detail: ${err.message || err}`);
+      }
     };
 
     const buffers = await Promise.all(cleanedChunks.map(processSingleChunk));
@@ -348,7 +381,7 @@ app.post("/api/tts", async (req, res) => {
   } catch (error: any) {
     console.error("[TTS Endpoint Error]:", error);
     if (!res.headersSent) {
-      res.status(500).json({ error: { message: error.message || "Synthesis pipeline failed." } });
+      res.status(503).json({ error: { message: error.message || "Server Busy: Speech synthesis is temporarily unavailable." } });
     } else {
       res.end();
     }
@@ -361,7 +394,7 @@ app.post("/api/generate-voice", async (req, res) => {
     // Proactively clean up expired files on every creation request
     cleanupTempAudioFiles().catch(() => {});
 
-    const { text, voice, rate, pitch, style } = req.body;
+    const { text, voice, style } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: { message: "Text parameter is required." } });
       return;
@@ -369,28 +402,8 @@ app.post("/api/generate-voice", async (req, res) => {
 
     const selectedVoice = voice || "my-MM-NilarNeural";
     
-    // Map style characteristics to pitch & rate if they are not explicitly provided
-    let finalRate = rate;
-    let finalPitch = pitch;
-
-    if (!finalRate || !finalPitch) {
-      if (style === "cheerful") {
-        finalRate = finalRate || "+12%";
-        finalPitch = finalPitch || "+10%";
-      } else if (style === "chat") {
-        finalRate = finalRate || "+5%";
-        finalPitch = finalPitch || "+3%";
-      } else if (style === "newscast") {
-        finalRate = finalRate || "-8%";
-        finalPitch = finalPitch || "-5%";
-      } else {
-        finalRate = finalRate || "+0%";
-        finalPitch = finalPitch || "+0Hz";
-      }
-    }
-    
-    finalRate = finalRate || "+0%";
-    finalPitch = finalPitch || "+0Hz";
+    // Strict Pitch & Rate mapping depending on selected Vocal Expression style
+    const { finalRate, finalPitch } = mapVoiceStyle(style);
 
     // Split at natural sentence breaks to synthesize in cohesive chunks
     const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
@@ -430,17 +443,49 @@ app.post("/api/generate-voice", async (req, res) => {
 
     const processSingleChunk = async (chunkText: string): Promise<Buffer> => {
       const sanitizedText = chunkText.replace(/<[^>]*>/g, "").replace(/[<>]/g, "");
-      const edgeTtsHost = getEdgeTtsHost();
-      const cleanEdgeTtsHost = edgeTtsHost.endsWith("/") ? edgeTtsHost.slice(0, -1) : edgeTtsHost;
-      const ttsUrl = `${cleanEdgeTtsHost}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
+      const host = "https://my-edge-tts-api.vercel.app";
+      const ttsUrl = `${host}/api/tts?text=${encodeURIComponent(sanitizedText)}&voice=${selectedVoice}&rate=${encodeURIComponent(finalRate)}&pitch=${encodeURIComponent(finalPitch)}`;
       
-      const response = await fetch(ttsUrl);
-      if (!response.ok) {
-        throw new Error(`Edge-TTS API failed with status ${response.status}`);
-      }
+      console.log(`[TTS Synthesis /api/generate-voice] Calling dedicated host: ${host} | Style: ${style} | Pitch: ${finalPitch} | Rate: ${finalRate}`);
+      
+      try {
+        const response = await fetch(ttsUrl, {
+          headers: {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+          }
+        });
 
-      const arrayBuffer = await response.arrayBuffer();
-      return Buffer.from(arrayBuffer);
+        if (!response.ok) {
+          if (response.status === 429 || response.status >= 500) {
+            throw new Error("Server Busy: Edge-TTS engine is temporarily rate-limited or overloaded. Please try again in a few seconds.");
+          }
+          throw new Error(`Edge-TTS server returned status ${response.status}`);
+        }
+
+        const contentType = response.headers.get("content-type") || "";
+        if (!contentType.includes("audio")) {
+          const bodyTxt = await response.text();
+          console.warn(`[TTS Synthesis] Expected audio but received: ${contentType}. Body prefix: ${bodyTxt.slice(0, 150)}`);
+          if (bodyTxt.includes("Rate limit") || bodyTxt.includes("Too Many Requests") || bodyTxt.includes("busy") || bodyTxt.includes("error")) {
+            throw new Error("Server Busy: Edge-TTS API rate limit reached or service is busy. Please try again in a few seconds.");
+          }
+          throw new Error("Server Busy: The dedicated Edge-TTS engine returned a non-audio response. Please wait a moment and try again.");
+        }
+
+        const arrayBuffer = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        if (buffer.length < 100) {
+          throw new Error("Server Busy: Edge-TTS returned an empty or incomplete audio stream. Please try again.");
+        }
+
+        return buffer;
+      } catch (err: any) {
+        console.error(`[TTS Synthesis /api/generate-voice] Error calling dedicated host:`, err.message || err);
+        if (err.message && err.message.includes("Server Busy")) {
+          throw err;
+        }
+        throw new Error(`Server Busy: Failed to communicate with the dedicated Edge-TTS host. Detail: ${err.message || err}`);
+      }
     };
 
     const buffers = await Promise.all(cleanedChunks.map(processSingleChunk));
@@ -461,7 +506,7 @@ app.post("/api/generate-voice", async (req, res) => {
     });
   } catch (error: any) {
     console.error("[Generate-Voice Endpoint Error]:", error);
-    res.status(500).json({ error: { message: error.message || "Synthesis pipeline failed." } });
+    res.json({ success: false, error: { message: error.message || "Server Busy: Speech synthesis is temporarily unavailable." } });
   }
 });
 
@@ -587,7 +632,7 @@ app.post("/api/subtitle/generate-stream", upload.single("file"), async (req, res
 
     sendProgress(70, "Sending audio track to Google Gemini Audio Pipeline...");
     const response = await generateContentWithRetry(ai, {
-      model: "gemini-2.5-flash",
+      model: "gemini-3.5-flash",
       contents: [
         {
           inlineData: {
@@ -620,42 +665,196 @@ app.post("/api/subtitle/generate-stream", upload.single("file"), async (req, res
   }
 });
 
-// Endpoint 7: Subtitle Aligner / Calibrator
-app.post("/api/subtitle/align", async (req, res) => {
+// Endpoint 7.1: Subtitle Audio File Uploader (Leverages Gemini File API for lightweight audio)
+app.post("/api/subtitle/upload-audio", upload.single("file"), async (req, res) => {
+  let tempFilePath = "";
   try {
-    const { text, segments, activeMediaDurationMs } = req.body;
-    if (!text && !segments) {
-      res.status(400).json({ error: { message: "Text or segments required for alignment." } });
+    const apiKey = getRequestApiKey(req);
+    if (!apiKey) {
+      res.status(400).json({ error: { message: "Gemini API Key is required for audio uploads." } });
       return;
     }
 
-    const duration = activeMediaDurationMs ? Number(activeMediaDurationMs) : 60000;
-    const segmentList = segments || text.split(/[\.။]+/).map((s: string) => s.trim()).filter(Boolean);
+    if (!req.file) {
+      res.status(400).json({ error: { message: "No audio file uploaded." } });
+      return;
+    }
 
-    // Apply proportional alignment blocks
-    const totalChars = segmentList.reduce((sum: number, s: string) => sum + s.length, 0);
-    let progressMs = 0;
+    tempFilePath = req.file.path;
 
-    const blocks = segmentList.map((seg: string, idx: number) => {
-      const cleanSeg = seg.trim();
-      const charRatio = totalChars > 0 ? cleanSeg.length / totalChars : 1 / segmentList.length;
-      const blockDuration = Math.round(charRatio * duration);
-
-      const startMs = progressMs;
-      const endMs = idx === segmentList.length - 1 ? duration : startMs + blockDuration;
-      progressMs = endMs;
-
-      return {
-        id: idx + 1,
-        startMs,
-        endMs,
-        text: cleanSeg,
-      };
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        }
+      }
     });
 
-    res.json({ blocks });
+    console.log("[Gemini File Upload] Uploading temp file to Gemini File API:", tempFilePath);
+    const uploadResult = await ai.files.upload({
+      file: tempFilePath,
+      config: {
+        mimeType: "audio/wav",
+      }
+    });
+
+    console.log("[Gemini File Upload] File uploaded successfully:", uploadResult.uri);
+
+    res.json({
+      success: true,
+      fileUri: uploadResult.uri,
+      mimeType: uploadResult.mimeType || "audio/wav",
+      name: uploadResult.name,
+    });
   } catch (error: any) {
-    res.status(500).json({ error: { message: error.message || "Alignment failed." } });
+    console.error("[Gemini Audio Upload Error]:", error);
+    res.status(500).json({ error: { message: error.message || "Failed to upload audio to Gemini File API." } });
+  } finally {
+    // Clean up temporary local file
+    if (tempFilePath && fs.existsSync(tempFilePath)) {
+      try {
+        await fs.promises.unlink(tempFilePath);
+      } catch (e) {
+        console.warn("Cleanup error for temp file:", e);
+      }
+    }
+  }
+});
+
+// Endpoint 7.2: Multimodal Gemini Subtitle Alignment Engine
+app.post("/api/subtitle/align-gemini", async (req, res) => {
+  try {
+    const { fileUri, mimeType, scriptText } = req.body;
+    const apiKey = getRequestApiKey(req);
+
+    if (!apiKey) {
+      res.status(400).json({ error: { message: "Gemini API Key is required for subtitle alignment." } });
+      return;
+    }
+
+    if (!fileUri || !scriptText) {
+      res.status(400).json({ error: { message: "Both fileUri and scriptText parameters are required." } });
+      return;
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          "User-Agent": "aistudio-build",
+        }
+      }
+    });
+
+    const promptText = `
+You are an expert, high-precision audio-to-text script aligner for Burmese language video production.
+Your task is to take the provided Burmese script and align it with the attached audio track.
+
+The Burmese script:
+"""
+${scriptText}
+"""
+
+STRICT BOUNDARY SEGMENTATION RULES:
+1. You MUST segment the input script exclusively into separate phrases at sentences broken down by Burmese punctuation symbols: periods (" . ") or Burmese comma/pause mark (" ၊ ") or Burmese sentence-end ("။").
+2. DO NOT combine different sentences into a single subtitle block. Each split phrase block must correspond to exactly one subtitle entry.
+3. Keep the text of each segment EXACTLY as written in the script (do not translate, summarize, or alter the characters).
+4. For each split phrase block, listen to the exact timestamp window in the audio file and return a structurally compliant .SRT block output with sequential indexing and timestamps.
+5. Start the timestamps exactly when the speaking of that phrase block starts, and end exactly when it ends. Timestamps must be highly accurate down to the millisecond, following the standard SRT time format: HH:MM:SS,mmm.
+
+FORMAT RULES:
+- Output the result strictly in SubRip (.SRT) subtitle file format.
+- Do NOT include any markdown formatting wrappers (such as \`\`\`srt or \`\`\`), do NOT include any introduction, explanations, notes, or conversational text. Start directly with the first subtitle block.
+
+Each subtitle block must follow this exact format:
+[Index]
+[HH:MM:SS,mmm] --> [HH:MM:SS,mmm]
+[Exact Burmese script segment]
+
+Example:
+1
+00:00:01,150 --> 00:00:04,320
+မြန်မာစာသားအပိုင်း
+
+Please produce the complete, highly aligned SRT subtitle track for the entire audio duration.
+`;
+
+    console.log("[Gemini Align] Invoking gemini-3.5-flash content generation...");
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: [
+        {
+          fileData: {
+            fileUri,
+            mimeType,
+          }
+        },
+        {
+          text: promptText,
+        }
+      ]
+    });
+
+    let srtText = response.text || "";
+    // Clean up any markdown code wrap if the model ignored our formatting constraint
+    if (srtText.includes("```")) {
+      srtText = srtText.replace(/```[a-zA-Z0-9]*\n/g, "").replace(/```/g, "");
+    }
+    srtText = srtText.trim();
+
+    console.log("[Gemini Align] Alignment response received, parsing SRT lines...");
+
+    // Parse the SRT text into blocks
+    const parsedBlocks: any[] = [];
+    const normalized = srtText.replace(/\r\n/g, "\n").trim();
+    const parts = normalized.split(/\n\s*\n/);
+    
+    let blockIdCounter = 1;
+    for (const part of parts) {
+      const lines = part.split("\n").map(l => l.trim()).filter(Boolean);
+      if (lines.length >= 3) {
+        // Find line containing time pattern '-->'
+        const timeLineIdx = lines.findIndex(l => l.includes("-->"));
+        if (timeLineIdx !== -1) {
+          const timeLine = lines[timeLineIdx];
+          const times = timeLine.split("-->").map(t => t.trim());
+          
+          const parseSrtTimeToMs = (timeStr: string): number => {
+            const timeParts = timeStr.trim().split(/[:,\.]/);
+            if (timeParts.length >= 4) {
+              const hrs = parseInt(timeParts[0], 10) || 0;
+              const mins = parseInt(timeParts[1], 10) || 0;
+              const secs = parseInt(timeParts[2], 10) || 0;
+              const mils = parseInt(timeParts[3], 10) || 0;
+              return (((hrs * 3600) + (mins * 60) + secs) * 1000) + mils;
+            }
+            return 0;
+          };
+
+          const startMs = parseSrtTimeToMs(times[0]);
+          const endMs = parseSrtTimeToMs(times[1]);
+          const blockText = lines.slice(timeLineIdx + 1).join("\n");
+
+          parsedBlocks.push({
+            id: blockIdCounter++,
+            startMs,
+            endMs,
+            text: blockText,
+          });
+        }
+      }
+    }
+
+    res.json({
+      success: true,
+      srtText,
+      blocks: parsedBlocks,
+    });
+
+  } catch (error: any) {
+    console.error("[Gemini Subtitle Align Error]:", error);
+    res.status(500).json({ error: { message: error.message || "Failed to align script with audio." } });
   }
 });
 

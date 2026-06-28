@@ -114,7 +114,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
         } else {
           const rawText = await response.text();
           if (rawText.startsWith("<!doctype") || rawText.startsWith("<html")) {
-            throw new Error("Server Network Error: Expected JSON, but received HTML error page.");
+            throw new Error(`Server Network Error: Expected JSON, but received HTML error page. Content snippet: ${rawText.slice(0, 300)}`);
           }
         }
         throw new Error(errorMsg);

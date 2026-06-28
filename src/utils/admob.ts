@@ -120,7 +120,8 @@ export async function preloadInterstitialAd() {
 export async function triggerInterstitialAd(
   promptMessage: string,
   onSuccess: () => void,
-  onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void
+  onAddNotification: (title: string, message: string, type: "info" | "success" | "warning") => void,
+  onFinish?: () => void
 ) {
   let isCompleted = false;
   let safetyTimeout: any = null;
@@ -130,6 +131,7 @@ export async function triggerInterstitialAd(
     isCompleted = true;
     if (safetyTimeout) clearTimeout(safetyTimeout);
     onSuccess();
+    if (onFinish) onFinish();
   };
 
   try {
@@ -145,6 +147,7 @@ export async function triggerInterstitialAd(
         "ကြော်ငြာမကြည့်ဘဲ ဤလုပ်ဆောင်ချက်ကို အသုံးပြု၍မရပါ။",
         "warning"
       );
+      if (onFinish) onFinish();
       return;
     }
 

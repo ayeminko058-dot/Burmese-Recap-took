@@ -29,8 +29,7 @@
     "multer": "^2.2.0",
     "react": "^19.0.1",
     "react-dom": "^19.0.1",
-    "vite": "^6.2.3",
-    "whisper-node": "^1.1.1"
+    "vite": "^6.2.3"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.4.1",
