@@ -277,7 +277,7 @@ export default function TtsStudio({ onAddNotification, onAddDownloadedFile, isAc
   };
 
   return (
-    <div className="h-full overflow-y-auto px-4 py-3 space-y-4 text-slate-200">
+    <div className="h-full overflow-y-auto px-4 py-3 pb-40 space-y-4 text-slate-200">
       {/* Title Header banner */}
       <div className="flex items-center gap-2.5 bg-gradient-to-r from-blue-900/40 to-slate-900 border border-blue-500/10 rounded-2xl p-3.5 shadow-md">
         <div className="w-9 h-9 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400">

@@ -253,15 +253,36 @@ async function cleanupTempAudioFiles() {
 // Endpoint 4: Edge-TTS Aggregator Service (Direct download / legacy fallback)
 app.post("/api/tts", async (req, res) => {
   try {
-    const { text, voice, rate, pitch } = req.body;
+    const { text, voice, rate, pitch, style } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: { message: "Text parameter is required." } });
       return;
     }
 
     const selectedVoice = voice || "my-MM-NilarNeural";
-    const finalRate = rate || "+0%";
-    const finalPitch = pitch || "+0Hz";
+    
+    // Map style characteristics to pitch & rate if they are not explicitly provided
+    let finalRate = rate;
+    let finalPitch = pitch;
+
+    if (!finalRate || !finalPitch) {
+      if (style === "cheerful") {
+        finalRate = finalRate || "+12%";
+        finalPitch = finalPitch || "+10%";
+      } else if (style === "chat") {
+        finalRate = finalRate || "+5%";
+        finalPitch = finalPitch || "+3%";
+      } else if (style === "newscast") {
+        finalRate = finalRate || "-8%";
+        finalPitch = finalPitch || "-5%";
+      } else {
+        finalRate = finalRate || "+0%";
+        finalPitch = finalPitch || "+0Hz";
+      }
+    }
+    
+    finalRate = finalRate || "+0%";
+    finalPitch = finalPitch || "+0Hz";
 
     // Split at natural sentence breaks to synthesize in cohesive chunks
     const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
@@ -340,15 +361,36 @@ app.post("/api/generate-voice", async (req, res) => {
     // Proactively clean up expired files on every creation request
     cleanupTempAudioFiles().catch(() => {});
 
-    const { text, voice, rate, pitch } = req.body;
+    const { text, voice, rate, pitch, style } = req.body;
     if (!text || typeof text !== "string") {
       res.status(400).json({ error: { message: "Text parameter is required." } });
       return;
     }
 
     const selectedVoice = voice || "my-MM-NilarNeural";
-    const finalRate = rate || "+0%";
-    const finalPitch = pitch || "+0Hz";
+    
+    // Map style characteristics to pitch & rate if they are not explicitly provided
+    let finalRate = rate;
+    let finalPitch = pitch;
+
+    if (!finalRate || !finalPitch) {
+      if (style === "cheerful") {
+        finalRate = finalRate || "+12%";
+        finalPitch = finalPitch || "+10%";
+      } else if (style === "chat") {
+        finalRate = finalRate || "+5%";
+        finalPitch = finalPitch || "+3%";
+      } else if (style === "newscast") {
+        finalRate = finalRate || "-8%";
+        finalPitch = finalPitch || "-5%";
+      } else {
+        finalRate = finalRate || "+0%";
+        finalPitch = finalPitch || "+0Hz";
+      }
+    }
+    
+    finalRate = finalRate || "+0%";
+    finalPitch = finalPitch || "+0Hz";
 
     // Split at natural sentence breaks to synthesize in cohesive chunks
     const sentences = text.split(/(?<=[။\.])/).map(s => s.trim()).filter(Boolean);
