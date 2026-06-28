@@ -43,8 +43,8 @@ jobs:
           mkdir -p ~/.bubblewrap
           cat <<EOF > ~/.bubblewrap/config.json
           {
-            "jdkPath": "$JAVA_HOME",
-            "androidSdkPath": "$ANDROID_HOME"
+            "jdkPath": "${JAVA_HOME}",
+            "androidSdkPath": "${ANDROID_HOME:-/usr/local/lib/android/sdk}"
           }
           EOF
           echo "Bubblewrap Config:"
@@ -53,16 +53,19 @@ jobs:
       - name: Bubblewrap Build (APK and AAB Generation)
         run: |
           # Doctor diagnostic check to ensure runtime SDK dependencies are met
-          yes | bubblewrap doctor || true
+          bubblewrap doctor || true
           
           # Initialize or validate manifest structure
           if [ ! -f "twa-manifest.json" ]; then
             echo "Initializing twa-manifest.json from manifest.json..."
-            yes | bubblewrap init --manifest="manifest.json" || true
+            bubblewrap init --manifest="manifest.json" || true
           fi
           
-          # Perform non-interactive deployment build
-          yes | bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey" --signingKeyPassword="androidpassword" --storePassword="androidpassword"
+          # Perform non-interactive deployment build using native environment variables
+          bubblewrap build --signingKeyPath="./android.keystore" --signingKeyAlias="androidkey"
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: "androidpassword"
+          BUBBLEWRAP_KEY_PASSWORD: "androidpassword"
 
       - name: Upload Signing Fingerprints & APK
         uses: actions/upload-artifact@v4
