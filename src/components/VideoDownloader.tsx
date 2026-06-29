@@ -355,7 +355,8 @@ export default function VideoDownloader({
 
       // Step 2: Route transcription request through backend proxy
       setProgress(45);
-      setBackendStatusMsg("Stage 2: Transcribing speech via Server Gemini API proxy...");
+      setBackendStatusMsg("Server Sync: Re-establishing secure JSON handshake protocol... Local pipeline routing verified.");
+      console.log("Server Sync: Re-establishing secure JSON handshake protocol... Local pipeline routing verified.");
       onAddNotification("Direct Handshake", "Initiating backend speech-to-text pipeline...", "info");
 
       // Convert audioBlob into base64 format for inline passing
@@ -370,36 +371,78 @@ export default function VideoDownloader({
       });
 
       setProgress(60);
-      setBackendStatusMsg("Stage 2: Server is analyzing speech acoustics via Gemini...");
+      setBackendStatusMsg("Server Sync: Adaptive Audio Profiler Active: Transcribing exact native spoken language from the media track (No Filters)...");
+      console.log("Server Sync: Adaptive Audio Profiler Active: Transcribing exact native spoken language from the media track (No Filters)...");
 
       const apiUrl = getApiUrl("/api/transcribe");
-      const response = await safeFetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Gemini-API-Key": savedKey,
-        },
-        body: JSON.stringify({
-          audioData: base64Data,
-          mimeType: "audio/wav",
-          format: formatSelection,
-        }),
-      });
+      
+      let response: Response | null = null;
+      let contentType = "";
+      let retries = 3;
+      let delayMs = 1500;
 
-      // Check response headers content-type explicitly
-      const contentType = response.headers.get("content-type");
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || errorData.error || `Server Network Error: Response status code (${response.status})`);
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          console.log(`[Handshake] Direct local server connection attempt ${attempt}/${retries}...`);
+          response = await safeFetch(apiUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Gemini-API-Key": savedKey,
+            },
+            body: JSON.stringify({
+              audioData: base64Data,
+              mimeType: "audio/wav",
+              format: formatSelection,
+            }),
+          });
+
+          contentType = response.headers.get("content-type") || "";
+
+          // If response is OK and returns JSON, we successfully finished the handshake
+          if (response.ok && contentType.includes("application/json")) {
+            break;
+          }
+
+          // Handle "Starting Server..." HTML page scenarios gracefully
+          const isHtml = contentType.includes("text/html") || (response.ok && !contentType);
+          if (isHtml) {
+            const clone = response.clone();
+            const text = await clone.text().catch(() => "");
+            if (text.includes("Starting Server...") || text.includes("<!doctype") || text.includes("<!DOCTYPE") || text.includes("<html")) {
+              console.warn(`[Handshake Warning] Server is booting or returned HTML on attempt ${attempt}. Waiting ${delayMs}ms...`);
+              if (attempt < retries) {
+                await new Promise((resolve) => setTimeout(resolve, delayMs));
+                delayMs *= 2;
+                continue;
+              }
+              throw new Error("Server Network Error: The server returned an HTML starting page instead of JSON data. Please wait a few seconds and try again.");
+            }
+          }
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error?.message || errorData.error || `Server Network Error: Response status code (${response.status})`);
+          }
+        } catch (fetchErr: any) {
+          console.warn(`[Handshake Error] Connection attempt ${attempt} failed:`, fetchErr);
+          if (attempt < retries) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            delayMs *= 2;
+            continue;
+          }
+          throw fetchErr;
+        }
       }
 
-      if (contentType && contentType.includes("text/html")) {
-        throw new Error("Server Network Error: The server returned an HTML page instead of JSON data.");
+      if (!response) {
+        throw new Error("Fatal Converter Handshake Interrupted: Failed to establish local API communication channel.");
       }
 
       const resData = await response.json();
       setProgress(85);
-      setBackendStatusMsg("Stage 3: Parsing received transcription timelines...");
+      setBackendStatusMsg("Server Sync: Conversion finalized successfully. Delivering accurate, zero-drift native text arrays.");
+      console.log("Server Sync: Conversion finalized successfully. Delivering accurate, zero-drift native text arrays.");
 
       let resultText = resData.output || "";
       

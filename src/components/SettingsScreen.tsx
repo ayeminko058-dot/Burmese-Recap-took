@@ -25,6 +25,9 @@ export default function SettingsScreen({
   const [validationStatus, setValidationStatus] = useState<"idle" | "validating" | "valid" | "unconfigured" | "invalid">("idle");
   const [validationError, setValidationError] = useState<string | null>(null);
 
+  // Custom API Server URL state
+  const [customServerUrl, setCustomServerUrl] = useState<string>("");
+
   // Load API key from local storage on component mount
   useEffect(() => {
     const savedKey = localStorage.getItem("gemini_api_key") || "";
@@ -35,7 +38,23 @@ export default function SettingsScreen({
     } else {
       setValidationStatus("unconfigured");
     }
+
+    const savedServerUrl = localStorage.getItem("custom_api_server_url") || "";
+    setCustomServerUrl(savedServerUrl);
   }, []);
+
+  const handleSaveServerUrl = () => {
+    localStorage.setItem("custom_api_server_url", customServerUrl.trim());
+    onAddNotification("Server Route Synchronized", "Custom backend server URL mapped successfully.", "success");
+    window.dispatchEvent(new Event("storage"));
+  };
+
+  const handleClearServerUrl = () => {
+    localStorage.removeItem("custom_api_server_url");
+    setCustomServerUrl("");
+    onAddNotification("Server Route Reset", "Backend routing fell back to the default cloud node.", "info");
+    window.dispatchEvent(new Event("storage"));
+  };
 
   const handleSaveKey = () => {
     if (!apiKey.trim()) {

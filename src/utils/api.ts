@@ -11,6 +11,15 @@ export function getApiUrl(endpoint: string): string {
   const cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
 
   if (typeof window !== "undefined") {
+    const customBase = localStorage.getItem("custom_api_server_url");
+    if (customBase && customBase.trim()) {
+      let base = customBase.trim();
+      while (base.endsWith("/")) {
+        base = base.slice(0, -1);
+      }
+      return `${base}${cleanEndpoint}`;
+    }
+
     const platform = Capacitor.getPlatform();
 
     // On the web, we must ALWAYS return the relative endpoint to prevent stale absolute URLs

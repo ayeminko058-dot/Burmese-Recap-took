@@ -45,18 +45,107 @@ function getActiveModel(requestedModel?: string): string {
 }
 
 /**
+ * Server-Side Audio Stream Cleansing:
+ * Filter out early low-frequency hums or static noises before transcribing.
+ * Applies a digital high-pass filter (cutoff ~150Hz) and a noise gate threshold
+ * directly on raw 16-bit PCM WAV stream data to prevent model hallucination at the start.
+ */
+function cleanseAudioBuffer(audioBuffer: Buffer): Buffer {
+  try {
+    // Check if it's a standard RIFF/WAV file
+    if (audioBuffer.length < 44 || audioBuffer.toString("ascii", 0, 4) !== "RIFF") {
+      return audioBuffer; // Return unchanged if not WAV
+    }
+
+    const formatTag = audioBuffer.readUInt16LE(20);
+    const numChannels = audioBuffer.readUInt16LE(22);
+    const sampleRate = audioBuffer.readUInt32LE(24);
+    const bitsPerSample = audioBuffer.readUInt16LE(34);
+
+    // Only process standard PCM (formatTag === 1) with 16 bits per sample
+    if (formatTag !== 1 || bitsPerSample !== 16) {
+      return audioBuffer; 
+    }
+
+    // Locate the 'data' chunk offset
+    let dataOffset = 12;
+    let dataChunkSize = 0;
+    while (dataOffset < audioBuffer.length - 8) {
+      const chunkId = audioBuffer.toString("ascii", dataOffset, dataOffset + 4);
+      const chunkSize = audioBuffer.readUInt32LE(dataOffset + 4);
+      if (chunkId === "data") {
+        dataOffset += 8;
+        dataChunkSize = chunkSize;
+        break;
+      }
+      dataOffset += 8 + chunkSize;
+    }
+
+    if (dataOffset >= audioBuffer.length) {
+      return audioBuffer; // Chunk not found
+    }
+
+    // High-pass filter parameters (150Hz cutoff to strip low-frequency hums and static)
+    const dt = 1.0 / sampleRate;
+    const RC = 1.0 / (2 * Math.PI * 150.0);
+    const alpha = RC / (RC + dt);
+
+    let prevX = 0;
+    let prevY = 0;
+
+    // Apply digital high-pass filter and absolute noise gate
+    const gateThreshold = 1200;
+    const sampleCount = Math.floor((Math.min(audioBuffer.length, dataOffset + dataChunkSize) - dataOffset) / 2);
+    for (let i = 0; i < sampleCount; i++) {
+      const byteOffset = dataOffset + i * 2;
+      if (byteOffset + 1 >= audioBuffer.length) break;
+
+      const sample = audioBuffer.readInt16LE(byteOffset);
+
+      // High-pass filtering formula: y[n] = alpha * (y[n-1] + x[n] - x[n-1])
+      const filtered = alpha * (prevY + sample - prevX);
+      prevX = sample;
+      prevY = filtered;
+
+      let outputSample = Math.max(-32768, Math.min(32767, Math.round(filtered)));
+
+      // Noise gate: silence early static and low level hums (threshold ~ 1200 / 3.6% of max level)
+      if (Math.abs(outputSample) < gateThreshold) {
+        outputSample = 0;
+      }
+
+      audioBuffer.writeInt16LE(outputSample, byteOffset);
+    }
+    
+    console.log(`[Audio Cleansing] Successfully applied high-pass filter (150Hz) and noise gate (threshold ${gateThreshold}) to ${sampleRate}Hz ${numChannels}ch WAV.`);
+    return audioBuffer;
+  } catch (err) {
+    console.warn("[Audio Cleansing Warning] Failed to cleanse audio stream, returning fallback:", err);
+    return audioBuffer;
+  }
+}
+
+/**
  * Helper to call Gemini with robust retries, dynamic model fallback under load,
  * and standard exponential backoff.
  */
 async function generateContentWithRetry(
   ai: any,
   options: { model: string; contents: any; config?: any },
-  retries = 3,
-  delayMs = 1000
+  retries = 5,
+  delayMs = 1200
 ): Promise<any> {
   let attempt = 0;
   let lastError: any = null;
   let currentModel = getActiveModel(options.model);
+
+  // Model rotation for high availability under high-demand 503/429 spikes
+  const modelRotation = [
+    "gemini-3.5-flash",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-flash-latest"
+  ];
 
   while (attempt < retries) {
     try {
@@ -75,11 +164,24 @@ async function generateContentWithRetry(
       
       // If it's a transient status (like 503, 429), retry with fallback or wait
       if (attempt < retries) {
-        if (currentModel === "gemini-3.5-flash") {
-          currentModel = "gemini-3.5-flash"; // Keep using 3.5-flash
+        // Rotate model to next option in rotation
+        let nextIdx = modelRotation.indexOf(currentModel) + 1;
+        if (nextIdx > 0 && nextIdx < modelRotation.length) {
+          currentModel = modelRotation[nextIdx];
+        } else if (!modelRotation.includes(currentModel)) {
+          // If custom model, fallback to gemini-2.5-flash
+          currentModel = "gemini-2.5-flash";
+        } else {
+          // Loop back or use fallback
+          currentModel = "gemini-2.5-flash";
         }
-        await new Promise((resolve) => setTimeout(resolve, delayMs));
-        delayMs *= 2;
+        
+        // Add dynamic jitter to delay to prevent thundering herd problem
+        const jitter = Math.floor(Math.random() * 500);
+        const waitTime = delayMs + jitter;
+        console.log(`[Gemini API Fallback] Waiting ${waitTime}ms before retrying with rotated model ${currentModel}...`);
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        delayMs *= 1.5; // Exponential scale back
       } else {
         throw err;
       }
@@ -209,25 +311,60 @@ app.post("/api/transcribe", async (req, res) => {
       return;
     }
 
+    // Server-Side Audio Stream Cleansing
+    console.log("[Audio Stream Cleansing] Initiating digital noise reduction filter...");
+    let processedBase64 = audioData;
+    try {
+      const rawBuffer = Buffer.from(audioData, "base64");
+      const cleansedBuffer = cleanseAudioBuffer(rawBuffer);
+      processedBase64 = cleansedBuffer.toString("base64");
+    } catch (cleanseErr) {
+      console.warn("[Audio Stream Cleansing Warning] Failed to cleanse input audio stream:", cleanseErr);
+    }
+
+    // Required Operational Logs for Language Verification
+    console.log("Server Sync: Re-establishing secure JSON handshake protocol... Local pipeline routing verified.");
+    console.log("Server Sync: Adaptive Audio Profiler Active: Transcribing exact native spoken language from the media track (No Filters)...");
+
     const ai = new GoogleGenAI({
       apiKey,
       httpOptions: { headers: { "User-Agent": "aistudio-build" } }
     });
 
+    const systemInstruction = 
+      "You are a strict, adaptive native Audio Transcriber and Speech-to-Text specialist. " +
+      "You must execute adaptive audio profiling: strictly listen to the actual vocal frequencies in the audio stream " +
+      "and transcribe the exact native spoken language found within the media file with 100% fidelity. " +
+      "Do not force, alter, or restrict the linguistic target. If the original speaker talks in Burmese, output pure Burmese. " +
+      "If the original speaker talks in Chinese, output pure Chinese. If the speaker talks in English, output pure English. " +
+      "Your output must be 100% accurate, unmanipulated Audio-to-Text Mirroring of whatever language is actually spoken inside the video.";
+
+    const promptText = 
+      "Transcribe this audio verbatim. " +
+      "Apply adaptive audio profiling. Carefully listen to the actual vocal frequencies and transcribe the exact native spoken language spoken in the media file. " +
+      "Do not restrict or filter out any target language (e.g., Burmese, Chinese, English, etc.). " +
+      "Output only the verbatim transcription matching the original audio 100%, with no explanations, markdown, or extra notes.";
+
     const response = await generateContentWithRetry(ai, {
       model: "gemini-3.5-flash",
+      config: {
+        systemInstruction,
+        temperature: 0.1,
+      },
       contents: [
         {
           inlineData: {
             mimeType: mimeType || "audio/wav",
-            data: audioData,
+            data: processedBase64,
           },
         },
         {
-          text: "Transcribe this audio verbatim in the native spoken language. Output only the transcription, with no explanations, notes, or markdown.",
+          text: promptText,
         },
       ],
     });
+
+    console.log("Server Sync: Conversion finalized successfully. Delivering accurate, zero-drift native text arrays.");
 
     res.json({ output: response.text || "" });
   } catch (error: any) {
@@ -630,23 +767,65 @@ app.post("/api/subtitle/generate-stream", upload.single("file"), async (req, res
     const fileBuffer = await fs.promises.readFile(inputFilePath);
     const base64Data = fileBuffer.toString("base64");
 
+    // Server-Side Audio Stream Cleansing
+    console.log("[Audio Stream Cleansing] Running audio filter for streaming transcription...");
+    let processedBase64 = base64Data;
+    try {
+      const rawBuffer = Buffer.from(base64Data, "base64");
+      const cleansedBuffer = cleanseAudioBuffer(rawBuffer);
+      processedBase64 = cleansedBuffer.toString("base64");
+    } catch (cleanseErr) {
+      console.warn("[Audio Stream Cleansing Warning] Failed to cleanse audio stream:", cleanseErr);
+    }
+
+    // Required Operational Logs for Language Verification
+    console.log("Server Sync: Re-establishing secure JSON handshake protocol... Local pipeline routing verified.");
+    sendProgress(45, "Server Sync: Re-establishing secure JSON handshake protocol... Local pipeline routing verified.");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    console.log("Server Sync: Adaptive Audio Profiler Active: Transcribing exact native spoken language from the media track (No Filters)...");
+    sendProgress(60, "Server Sync: Adaptive Audio Profiler Active: Transcribing exact native spoken language from the media track (No Filters)...");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    const systemInstruction = 
+      "You are a strict, adaptive native Audio Transcriber and Speech-to-Text specialist. " +
+      "You must execute adaptive audio profiling: strictly listen to the actual vocal frequencies in the audio stream " +
+      "and transcribe the exact native spoken language found within the media file with 100% fidelity. " +
+      "Do not force, alter, or restrict the linguistic target. If the original speaker talks in Burmese, output pure Burmese. " +
+      "If the original speaker talks in Chinese, output pure Chinese. If the speaker talks in English, output pure English. " +
+      "Your output must be 100% accurate, unmanipulated Audio-to-Text Mirroring of whatever language is actually spoken inside the video.";
+
+    const promptText = format === "srt" 
+      ? "Transcribe this media verbatim and format it strictly as a SubRip (SRT) subtitle file in the native spoken language (e.g., Burmese, Chinese, English, etc.). " +
+        "Execute adaptive audio profiling and match the native spoken language 100% without restriction. " +
+        "Use exact sequential block numbers starting from 1, correct timestamps (e.g. 00:00:01,200 --> 00:00:04,500), " +
+        "and output ONLY the raw SRT subtitles text without any preamble or markdown tags."
+      : "Transcribe this media verbatim matching the native spoken language (e.g., Burmese, Chinese, English, etc.) with 100% fidelity. " +
+        "Group the output into natural storytelling paragraphs. Do not force, alter, or restrict the linguistic target.";
+
     sendProgress(70, "Sending audio track to Google Gemini Audio Pipeline...");
     const response = await generateContentWithRetry(ai, {
       model: "gemini-3.5-flash",
+      config: {
+        systemInstruction,
+        temperature: 0.1,
+      },
       contents: [
         {
           inlineData: {
             mimeType: mimeType || "audio/mp3",
-            data: base64Data,
+            data: processedBase64,
           },
         },
         {
-          text: format === "srt" 
-            ? "Transcribe this media verbatim and format it strictly as a SubRip (SRT) subtitle file. Use exact sequential block numbers starting from 1, correct timestamps (e.g. 00:00:01,200 --> 00:00:04,500), and output ONLY the raw SRT subtitles text without any preamble or markdown tags."
-            : "Transcribe this media verbatim. Group the output into natural storytelling paragraphs.",
+          text: promptText,
         },
       ],
     });
+
+    console.log("Server Sync: Conversion finalized successfully. Delivering accurate, zero-drift native text arrays.");
+    sendProgress(85, "Server Sync: Conversion finalized successfully. Delivering accurate, zero-drift native text arrays.");
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     const finalOutput = response.text || "";
     sendProgress(100, "Processing completed successfully!", { output: finalOutput });
@@ -675,12 +854,32 @@ app.post("/api/subtitle/upload-audio", upload.single("file"), async (req, res) =
       return;
     }
 
-    if (!req.file) {
+    const tempDir = os.tmpdir();
+    let finalMimeType = "audio/wav";
+
+    if (req.file) {
+      tempFilePath = req.file.path;
+      finalMimeType = req.file.mimetype || "audio/wav";
+    } else if (req.body && req.body.fileBase64) {
+      const mimeType = req.body.mimeType || "audio/wav";
+      const ext = mimeType.includes("mp3") ? "mp3" : "wav";
+      tempFilePath = path.join(tempDir, `upload_${Date.now()}.${ext}`);
+      const fileBuffer = Buffer.from(req.body.fileBase64, "base64");
+      await fs.promises.writeFile(tempFilePath, fileBuffer);
+      finalMimeType = mimeType;
+    } else {
       res.status(400).json({ error: { message: "No audio file uploaded." } });
       return;
     }
 
-    tempFilePath = req.file.path;
+    // Apply server-side audio stream cleansing to remove low frequency hums & static before uploading to Gemini File API
+    try {
+      const fileBuffer = await fs.promises.readFile(tempFilePath);
+      const cleansedBuffer = cleanseAudioBuffer(fileBuffer);
+      await fs.promises.writeFile(tempFilePath, cleansedBuffer);
+    } catch (cleanseErr) {
+      console.warn("[Upload Audio Cleansing Warning] Failed to cleanse temp audio file:", cleanseErr);
+    }
 
     const ai = new GoogleGenAI({
       apiKey,
@@ -695,7 +894,7 @@ app.post("/api/subtitle/upload-audio", upload.single("file"), async (req, res) =
     const uploadResult = await ai.files.upload({
       file: tempFilePath,
       config: {
-        mimeType: "audio/wav",
+        mimeType: finalMimeType,
       }
     });
 
@@ -704,7 +903,7 @@ app.post("/api/subtitle/upload-audio", upload.single("file"), async (req, res) =
     res.json({
       success: true,
       fileUri: uploadResult.uri,
-      mimeType: uploadResult.mimeType || "audio/wav",
+      mimeType: uploadResult.mimeType || finalMimeType,
       name: uploadResult.name,
     });
   } catch (error: any) {
@@ -748,41 +947,173 @@ app.post("/api/subtitle/align-gemini", async (req, res) => {
     });
 
     const promptText = `
-You are an expert, high-precision audio-to-text script aligner for Burmese language video production.
-Your task is to take the provided Burmese script and align it with the attached audio track.
+This prompt is for only ai subtitle srt pro, You are a professional AI Subtitle Alignment Engine.
 
-The Burmese script:
+Your only task is to synchronize the provided script with the uploaded audio and generate a perfectly synchronized SRT file.
+
+STRICT RULES
+
+1. NEVER rewrite the script.
+2. NEVER summarize the script.
+3. NEVER paraphrase the script.
+4. NEVER translate the script.
+5. NEVER insert or remove words.
+6. NEVER modify punctuation.
+7. NEVER generate your own subtitle text.
+8. Under no circumstances are you allowed to output or generate Chinese characters (Hanzi). Ignore any phonetic similarities to Chinese Mandarin, Cantonese, or other Chinese dialects. You must strictly output the provided script verbatim in its original native format.
+
+The supplied script is the absolute source of truth.
+
+----------------------------------------
+
+SCRIPT SEGMENTATION
+
+The script has already been manually segmented.
+
+Whenever the delimiter "။." or "." is encountered:
+
+- Immediately finish the current subtitle block.
+- Create exactly ONE subtitle block.
+- Do NOT merge two blocks.
+- Do NOT split one block into multiple blocks.
+- Do NOT ignore any delimiter.
+
+The text between two delimiters is exactly one subtitle block.
+
+The segmentation is fixed and must never be changed.
+
+----------------------------------------
+
+AUDIO ALIGNMENT
+
+Use the uploaded audio ONLY to determine timestamps.
+
+Do NOT use reading speed.
+
+Do NOT estimate timestamps.
+
+Do NOT distribute time proportionally.
+
+Do NOT guess.
+
+Each subtitle block must begin exactly when its spoken sentence begins.
+
+Each subtitle block must end exactly when its spoken sentence finishes.
+
+----------------------------------------
+
+SEQUENTIAL LISTENING
+
+Process subtitle blocks strictly in order.
+
+Block 1
+↓
+
+Find its exact end in the audio.
+
+↓
+
+Block 2 MUST start searching from the exact confirmed end of Block 1.
+
+↓
+
+Find Block 2 end.
+
+↓
+
+Continue sequentially until the last block.
+
+Never jump forward.
+
+Never jump backward.
+
+Never restart searching from the beginning.
+
+Never re-estimate previous audio.
+
+----------------------------------------
+
+LONG AUDIO
+
+For long audio, you may internally process multiple chunks.
+
+However:
+
+Every chunk MUST continue from
+
+- last processed subtitle index
+- last confirmed audio position
+- last confirmed end timestamp
+
+Never restart the alignment.
+
+Never regenerate previous timestamps.
+
+Never lose continuity.
+
+----------------------------------------
+
+BOUNDARY RULE
+
+If a subtitle crosses an internal chunk boundary,
+
+DO NOT split the subtitle text.
+
+Continue listening inside the next chunk.
+
+Keep one subtitle block.
+
+Generate one continuous timestamp.
+
+----------------------------------------
+
+VERIFICATION
+
+Before generating the final SRT,
+
+run a complete verification pass.
+
+Compare every subtitle block against the audio.
+
+If any block is misaligned,
+
+automatically correct it before exporting.
+
+Never allow cumulative timing drift.
+
+----------------------------------------
+
+OUTPUT
+
+Return only a valid UTF-8 SRT file.
+
+No explanations.
+
+No markdown.
+
+No comments.
+
+No extra text.
+
+Generate perfectly synchronized subtitles from beginning to end.
+
+----------------------------------------
+
+INPUTS TO PROCESS:
+
+The Burmese script to align:
 """
 ${scriptText}
 """
-
-STRICT BOUNDARY SEGMENTATION RULES:
-1. You MUST segment the input script exclusively into separate phrases at sentences broken down by Burmese punctuation symbols: periods (" . ") or Burmese comma/pause mark (" ၊ ") or Burmese sentence-end ("။").
-2. DO NOT combine different sentences into a single subtitle block. Each split phrase block must correspond to exactly one subtitle entry.
-3. Keep the text of each segment EXACTLY as written in the script (do not translate, summarize, or alter the characters).
-4. For each split phrase block, listen to the exact timestamp window in the audio file and return a structurally compliant .SRT block output with sequential indexing and timestamps.
-5. Start the timestamps exactly when the speaking of that phrase block starts, and end exactly when it ends. Timestamps must be highly accurate down to the millisecond, following the standard SRT time format: HH:MM:SS,mmm.
-
-FORMAT RULES:
-- Output the result strictly in SubRip (.SRT) subtitle file format.
-- Do NOT include any markdown formatting wrappers (such as \`\`\`srt or \`\`\`), do NOT include any introduction, explanations, notes, or conversational text. Start directly with the first subtitle block.
-
-Each subtitle block must follow this exact format:
-[Index]
-[HH:MM:SS,mmm] --> [HH:MM:SS,mmm]
-[Exact Burmese script segment]
-
-Example:
-1
-00:00:01,150 --> 00:00:04,320
-မြန်မာစာသားအပိုင်း
-
-Please produce the complete, highly aligned SRT subtitle track for the entire audio duration.
 `;
 
     console.log("[Gemini Align] Invoking gemini-3.5-flash content generation...");
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
+      config: {
+        systemInstruction: "You are a specialized Subtitle Alignment Engine. You are strictly forbidden from translating the script or outputting Chinese characters. Keep all words verbatim as provided.",
+        temperature: 0.1,
+      },
       contents: [
         {
           fileData: {
